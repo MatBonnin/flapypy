@@ -63,6 +63,9 @@ enum Prop { TREE, ROCK, BARREL, CRATE, HAY, STUMP, BUSH, PUMPKIN }
 ## Doit suivre l'ordre de l'enum Prop.
 const PROP_COUNTS: Array[int] = [10, 8, 7, 7, 6, 6, 8, 7]
 
+## Surchargeable (les tests utilisent un port dedie pour ne pas entrer en
+## collision avec une partie en cours sur la machine).
+var listen_port := PORT
 var peer: ENetMultiplayerPeer = null
 var players: Dictionary = {}
 var player_names: Dictionary = {}
@@ -298,7 +301,7 @@ func _build_ui() -> void:
 	root.add_child(main_menu_button)
 
 	status_label = Label.new()
-	status_label.text = "Un chercheur, les autres se transforment en objets. 2 a 4 joueurs sur le meme reseau."
+	status_label.text = "Un chercheur, les autres se transforment en objets. 2 a 4 joueurs sur le meme reseau.\n%s" % _local_network_hint()
 	status_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	status_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	root.add_child(status_label)
@@ -503,6 +506,31 @@ func _key_name(keycode: int) -> String:
 		return str(keycode)
 	return text
 
+func _local_network_hint() -> String:
+	var addresses := _get_lan_addresses()
+	if addresses.is_empty():
+		return "Aucune IPv4 LAN detectee. Verifie le Wi-Fi/Ethernet et evite 127.0.0.1."
+	return "IP a donner : %s | Port UDP : %d" % [", ".join(addresses), PORT]
+
+func _get_lan_addresses() -> PackedStringArray:
+	var addresses := PackedStringArray()
+	for address in IP.get_local_addresses():
+		var text := str(address)
+		if _is_private_ipv4(text) and not addresses.has(text):
+			addresses.append(text)
+	return addresses
+
+func _is_private_ipv4(address: String) -> bool:
+	var parts := address.split(".")
+	if parts.size() != 4:
+		return false
+	if address.begins_with("10.") or address.begins_with("192.168."):
+		return true
+	if address.begins_with("172."):
+		var second := int(parts[1])
+		return second >= 16 and second <= 31
+	return false
+
 func _back_to_main_menu() -> void:
 	if multiplayer.multiplayer_peer != null:
 		multiplayer.multiplayer_peer.close()
@@ -512,9 +540,9 @@ func _back_to_main_menu() -> void:
 
 func _host_game() -> void:
 	peer = ENetMultiplayerPeer.new()
-	var err := peer.create_server(PORT, MAX_PLAYERS - 1)
+	var err := peer.create_server(listen_port, MAX_PLAYERS - 1)
 	if err != OK:
-		status_label.text = "Impossible d'heberger sur le port %d." % PORT
+		status_label.text = "Impossible d'heberger sur le port %d." % listen_port
 		return
 	multiplayer.multiplayer_peer = peer
 	var host_id := multiplayer.get_unique_id()
@@ -528,7 +556,7 @@ func _host_game() -> void:
 
 func _join_game() -> void:
 	peer = ENetMultiplayerPeer.new()
-	var err := peer.create_client(ip_edit.text.strip_edges(), PORT)
+	var err := peer.create_client(ip_edit.text.strip_edges(), listen_port)
 	if err != OK:
 		status_label.text = "Connexion impossible."
 		return
@@ -594,6 +622,10 @@ func _server_register_player(display_name: String) -> void:
 			existing_pos = existing_player.global_position
 		rpc_id(id, "_client_spawn_player", existing_id, player_names[existing_id], existing_pos, existing_hp, existing_dead)
 	rpc("_client_spawn_player", id, player_names[id], spawn_pos, 8, false)
+	# le nouveau venu doit voir les deguisements deja en cours dans le lobby
+	for morph_id in morphs:
+		if int(morphs[morph_id]) >= 0:
+			rpc_id(id, "_client_set_morph", morph_id, int(morphs[morph_id]))
 	_broadcast_scoreboard()
 
 @rpc("authority", "reliable")
@@ -658,9 +690,11 @@ func _server_player_state(pos: Vector3, rot_y: float) -> void:
 	var player: CharacterBody3D = players.get(id)
 	if player == null or player.dead:
 		return
-	player.global_position = _clamp_to_arena(pos)
-	player.rotation.y = rot_y
-	rpc("_client_player_state", id, player.global_position, player.rotation.y, player.hp, player.dead)
+	# pvp_target_* d'abord : teleporter global_position ferait clignoter le
+	# joueur cote hote (le lerp le ramenerait vers une cible jamais mise a jour)
+	var clamped_pos := _clamp_to_arena(pos)
+	player.set_pvp_remote_state(clamped_pos, rot_y, player.hp, player.dead)
+	rpc("_client_player_state", id, clamped_pos, rot_y, player.hp, player.dead)
 
 @rpc("authority", "unreliable")
 func _client_player_state(peer_id: int, pos: Vector3, rot_y: float, hp_value: int, is_dead: bool) -> void:
@@ -732,7 +766,9 @@ func _client_set_morph(peer_id: int, prop_type: int) -> void:
 		player.model.visible = false
 		if peer_id != seeker_id:
 			player.speed_mult = MORPH_SPEED_MULT
-		if sfx:
+		# son uniquement local : le chercheur ne doit pas entendre les
+		# re-deguisements des props
+		if sfx and peer_id == multiplayer.get_unique_id():
 			sfx.play_flap()
 	else:
 		player.model.visible = true
@@ -774,8 +810,6 @@ func _server_apply_strike(attacker_id: int) -> void:
 				rpc("_client_set_morph", victim_id, -1)
 				_broadcast_scoreboard()
 	if hit_any:
-		if sfx:
-			sfx.play_hit()
 		_check_round_end()
 	else:
 		_server_punish_miss(attacker)
@@ -791,8 +825,21 @@ func _server_punish_miss(attacker: CharacterBody3D) -> void:
 @rpc("authority", "call_local", "reliable")
 func _client_player_health(peer_id: int, hp_value: int, is_dead: bool) -> void:
 	var player: CharacterBody3D = players.get(peer_id)
-	if player != null:
-		player.set_pvp_health(hp_value, is_dead)
+	if player == null:
+		return
+	var old_hp: int = player.hp
+	player.set_pvp_health(hp_value, is_dead)
+	if hp_value >= old_hp:
+		return
+	# le flash rouge de set_pvp_health touche le modele d'oiseau, invisible
+	# sous un deguisement : on ecrase le prop et on joue le son partout
+	if sfx:
+		sfx.play_hit()
+	var morph: Node3D = player.get_node_or_null("MorphVisual")
+	if morph != null:
+		var tw := morph.create_tween()
+		tw.tween_property(morph, "scale", Vector3.ONE * 0.78, 0.06)
+		tw.tween_property(morph, "scale", Vector3.ONE, 0.1)
 
 func _broadcast_scoreboard() -> void:
 	var data: Array = []
@@ -895,6 +942,11 @@ func _client_phase_changed(new_phase: int) -> void:
 		Phase.LOBBY:
 			seeker_overlay.visible = false
 			_set_local_frozen(false)
+			# plus de bonus de vitesse du chercheur en dehors d'une manche
+			for id in players:
+				var player: CharacterBody3D = players[id]
+				if player != null:
+					player.speed_mult = MORPH_SPEED_MULT if int(morphs.get(id, -1)) >= 0 else 1.0
 			if multiplayer.multiplayer_peer != null and multiplayer.is_server():
 				message_label.text = "Retour au lobby. Clique « Lancer la manche » quand tout le monde est la."
 			else:

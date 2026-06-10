@@ -12,6 +12,7 @@ func _ready() -> void:
 	get_tree().root.add_child.call_deferred(arena)
 	await get_tree().process_frame
 	await get_tree().process_frame
+	arena.listen_port = 52425  # port dedie : ne pas gener une partie en cours
 	arena._host_game()
 	await get_tree().process_frame
 	# 2e joueur simule directement cote serveur
