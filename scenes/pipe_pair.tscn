@@ -1,0 +1,54 @@
+[gd_scene load_steps=4 format=3]
+
+[ext_resource type="Script" path="res://scripts/pipe_pair.gd" id="1_pipe"]
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_pipe"]
+size = Vector2(80, 800)
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_gate"]
+size = Vector2(10, 800)
+
+[node name="PipePair" type="Node2D"]
+script = ExtResource("1_pipe")
+
+[node name="TopPipe" type="Area2D" parent="." groups=["hazard"]]
+
+[node name="Body" type="ColorRect" parent="TopPipe"]
+offset_left = -40.0
+offset_top = -800.0
+offset_right = 40.0
+color = Color(0.30, 0.69, 0.31, 1)
+
+[node name="Cap" type="ColorRect" parent="TopPipe"]
+offset_left = -46.0
+offset_top = -28.0
+offset_right = 46.0
+color = Color(0.22, 0.56, 0.24, 1)
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="TopPipe"]
+position = Vector2(0, -400)
+shape = SubResource("RectangleShape2D_pipe")
+
+[node name="BottomPipe" type="Area2D" parent="." groups=["hazard"]]
+
+[node name="Body" type="ColorRect" parent="BottomPipe"]
+offset_left = -40.0
+offset_right = 40.0
+offset_bottom = 800.0
+color = Color(0.30, 0.69, 0.31, 1)
+
+[node name="Cap" type="ColorRect" parent="BottomPipe"]
+offset_left = -46.0
+offset_right = 46.0
+offset_bottom = 28.0
+color = Color(0.22, 0.56, 0.24, 1)
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="BottomPipe"]
+position = Vector2(0, 400)
+shape = SubResource("RectangleShape2D_pipe")
+
+[node name="ScoreGate" type="Area2D" parent="." groups=["score"]]
+position = Vector2(50, 400)
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="ScoreGate"]
+shape = SubResource("RectangleShape2D_gate")

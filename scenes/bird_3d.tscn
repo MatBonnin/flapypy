@@ -1,0 +1,87 @@
+[gd_scene load_steps=13 format=3]
+
+[ext_resource type="Script" path="res://scripts/bird_3d.gd" id="1_bird3d"]
+
+[sub_resource type="SphereShape3D" id="SphereShape3D_bird"]
+radius = 0.45
+
+[sub_resource type="StandardMaterial3D" id="Material_body"]
+albedo_color = Color(0.97, 0.82, 0.27, 1)
+
+[sub_resource type="StandardMaterial3D" id="Material_wing"]
+albedo_color = Color(0.85, 0.64, 0.15, 1)
+
+[sub_resource type="StandardMaterial3D" id="Material_beak"]
+albedo_color = Color(0.91, 0.52, 0.17, 1)
+
+[sub_resource type="StandardMaterial3D" id="Material_white"]
+albedo_color = Color(1, 1, 1, 1)
+
+[sub_resource type="StandardMaterial3D" id="Material_black"]
+albedo_color = Color(0.05, 0.05, 0.05, 1)
+
+[sub_resource type="SphereMesh" id="SphereMesh_body"]
+material = SubResource("Material_body")
+radius = 0.45
+height = 0.9
+
+[sub_resource type="SphereMesh" id="SphereMesh_wing"]
+material = SubResource("Material_wing")
+radius = 0.28
+height = 0.56
+
+[sub_resource type="CylinderMesh" id="CylinderMesh_beak"]
+material = SubResource("Material_beak")
+top_radius = 0.02
+bottom_radius = 0.16
+height = 0.45
+
+[sub_resource type="SphereMesh" id="SphereMesh_eye"]
+material = SubResource("Material_white")
+radius = 0.11
+height = 0.22
+
+[sub_resource type="SphereMesh" id="SphereMesh_pupil"]
+material = SubResource("Material_black")
+radius = 0.055
+height = 0.11
+
+[node name="Bird" type="Area3D"]
+script = ExtResource("1_bird3d")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="."]
+shape = SubResource("SphereShape3D_bird")
+
+[node name="Body" type="MeshInstance3D" parent="."]
+mesh = SubResource("SphereMesh_body")
+
+[node name="WingFront" type="MeshInstance3D" parent="."]
+position = Vector3(-0.1, 0, 0.32)
+scale = Vector3(1.2, 0.55, 0.5)
+mesh = SubResource("SphereMesh_wing")
+
+[node name="WingBack" type="MeshInstance3D" parent="."]
+position = Vector3(-0.1, 0, -0.32)
+scale = Vector3(1.2, 0.55, 0.5)
+mesh = SubResource("SphereMesh_wing")
+
+[node name="Beak" type="MeshInstance3D" parent="."]
+position = Vector3(0.58, 0, 0)
+rotation = Vector3(0, 0, -1.5708)
+mesh = SubResource("CylinderMesh_beak")
+
+[node name="EyeFront" type="MeshInstance3D" parent="."]
+position = Vector3(0.26, 0.16, 0.3)
+mesh = SubResource("SphereMesh_eye")
+
+[node name="PupilFront" type="MeshInstance3D" parent="."]
+position = Vector3(0.33, 0.16, 0.35)
+mesh = SubResource("SphereMesh_pupil")
+
+[node name="EyeBack" type="MeshInstance3D" parent="."]
+position = Vector3(0.26, 0.16, -0.3)
+mesh = SubResource("SphereMesh_eye")
+
+[node name="PupilBack" type="MeshInstance3D" parent="."]
+position = Vector3(0.33, 0.16, -0.35)
+mesh = SubResource("SphereMesh_pupil")

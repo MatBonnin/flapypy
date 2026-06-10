@@ -1,0 +1,27 @@
+[gd_scene load_steps=5 format=3]
+
+[ext_resource type="Script" path="res://scripts/beak_projectile.gd" id="1_beak"]
+
+[sub_resource type="SphereShape3D" id="SphereShape3D_hit"]
+radius = 0.18
+
+[sub_resource type="StandardMaterial3D" id="Material_orange"]
+albedo_color = Color(0.91, 0.52, 0.17, 1)
+
+[sub_resource type="CylinderMesh" id="CylinderMesh_beak"]
+material = SubResource("Material_orange")
+top_radius = 0.02
+bottom_radius = 0.15
+height = 0.4
+
+[node name="BeakProjectile" type="Area3D"]
+collision_layer = 0
+collision_mask = 6
+script = ExtResource("1_beak")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="."]
+shape = SubResource("SphereShape3D_hit")
+
+[node name="Mesh" type="MeshInstance3D" parent="."]
+rotation = Vector3(1.5708, 0, 0)
+mesh = SubResource("CylinderMesh_beak")

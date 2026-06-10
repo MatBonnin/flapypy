@@ -1,0 +1,117 @@
+[gd_scene load_steps=13 format=3]
+
+[ext_resource type="Script" path="res://scripts/pipeman.gd" id="1_pipeman"]
+
+[sub_resource type="CapsuleShape3D" id="CapsuleShape3D_body"]
+radius = 0.3
+height = 1.1
+
+[sub_resource type="StandardMaterial3D" id="Material_pipe"]
+albedo_color = Color(0.3, 0.69, 0.31, 1)
+
+[sub_resource type="StandardMaterial3D" id="Material_dark"]
+albedo_color = Color(0.2, 0.5, 0.22, 1)
+
+[sub_resource type="StandardMaterial3D" id="Material_white"]
+albedo_color = Color(1, 1, 1, 1)
+
+[sub_resource type="StandardMaterial3D" id="Material_black"]
+albedo_color = Color(0.05, 0.05, 0.05, 1)
+
+[sub_resource type="CylinderMesh" id="CylinderMesh_body"]
+material = SubResource("Material_pipe")
+top_radius = 0.28
+bottom_radius = 0.28
+height = 0.8
+
+[sub_resource type="CylinderMesh" id="CylinderMesh_cap"]
+material = SubResource("Material_dark")
+top_radius = 0.34
+bottom_radius = 0.34
+height = 0.15
+
+[sub_resource type="CapsuleMesh" id="CapsuleMesh_arm"]
+material = SubResource("Material_dark")
+radius = 0.07
+height = 0.35
+
+[sub_resource type="CylinderMesh" id="CylinderMesh_leg"]
+material = SubResource("Material_dark")
+top_radius = 0.08
+bottom_radius = 0.08
+height = 0.3
+
+[sub_resource type="SphereMesh" id="SphereMesh_eye"]
+material = SubResource("Material_white")
+radius = 0.09
+height = 0.18
+
+[sub_resource type="SphereMesh" id="SphereMesh_pupil"]
+material = SubResource("Material_black")
+radius = 0.045
+height = 0.09
+
+[node name="Pipeman" type="CharacterBody3D" groups=["enemies"]]
+collision_layer = 2
+collision_mask = 7
+script = ExtResource("1_pipeman")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="."]
+position = Vector3(0, 0.55, 0)
+shape = SubResource("CapsuleShape3D_body")
+
+[node name="Model" type="Node3D" parent="."]
+
+[node name="LegPivotL" type="Node3D" parent="Model"]
+position = Vector3(-0.13, 0.3, 0)
+
+[node name="Mesh" type="MeshInstance3D" parent="Model/LegPivotL"]
+position = Vector3(0, -0.15, 0)
+mesh = SubResource("CylinderMesh_leg")
+
+[node name="LegPivotR" type="Node3D" parent="Model"]
+position = Vector3(0.13, 0.3, 0)
+
+[node name="Mesh" type="MeshInstance3D" parent="Model/LegPivotR"]
+position = Vector3(0, -0.15, 0)
+mesh = SubResource("CylinderMesh_leg")
+
+[node name="Body" type="MeshInstance3D" parent="Model"]
+position = Vector3(0, 0.7, 0)
+mesh = SubResource("CylinderMesh_body")
+
+[node name="Cap" type="MeshInstance3D" parent="Model"]
+position = Vector3(0, 1.15, 0)
+mesh = SubResource("CylinderMesh_cap")
+
+[node name="ArmPivotL" type="Node3D" parent="Model"]
+position = Vector3(-0.34, 0.88, 0)
+
+[node name="Mesh" type="MeshInstance3D" parent="Model/ArmPivotL"]
+position = Vector3(-0.03, -0.17, 0)
+rotation = Vector3(0, 0, 0.35)
+mesh = SubResource("CapsuleMesh_arm")
+
+[node name="ArmPivotR" type="Node3D" parent="Model"]
+position = Vector3(0.34, 0.88, 0)
+
+[node name="Mesh" type="MeshInstance3D" parent="Model/ArmPivotR"]
+position = Vector3(0.03, -0.17, 0)
+rotation = Vector3(0, 0, -0.35)
+mesh = SubResource("CapsuleMesh_arm")
+
+[node name="EyeL" type="MeshInstance3D" parent="Model"]
+position = Vector3(-0.11, 0.95, 0.24)
+mesh = SubResource("SphereMesh_eye")
+
+[node name="PupilL" type="MeshInstance3D" parent="Model"]
+position = Vector3(-0.11, 0.95, 0.31)
+mesh = SubResource("SphereMesh_pupil")
+
+[node name="EyeR" type="MeshInstance3D" parent="Model"]
+position = Vector3(0.11, 0.95, 0.24)
+mesh = SubResource("SphereMesh_eye")
+
+[node name="PupilR" type="MeshInstance3D" parent="Model"]
+position = Vector3(0.11, 0.95, 0.31)
+mesh = SubResource("SphereMesh_pupil")
