@@ -53,10 +53,16 @@ var swing := 0.0
 var attacking := false
 var dead := false
 var sfx: Node = null
+var pvp_enabled := false
+var pvp_peer_id := 0
+var pvp_arena: Node = null
+var pvp_target_position := Vector3.ZERO
+var pvp_target_rotation := 0.0
 
 var _meshes: Array[MeshInstance3D] = []
 var _gold_mat: Material = null
 var _flash_mat: StandardMaterial3D
+var _pvp_base_mats := {}
 
 @onready var model: Node3D = $Model
 @onready var right_arm: Node3D = $Model/RightArm
@@ -70,17 +76,27 @@ var _flash_mat: StandardMaterial3D
 
 func _ready() -> void:
 	_collect_meshes(model)
+	for m in _meshes:
+		_pvp_base_mats[m] = m.material_override
+	pvp_target_position = global_position
+	pvp_target_rotation = rotation.y
 	_flash_mat = StandardMaterial3D.new()
 	_flash_mat.albedo_color = Color(1, 0.3, 0.3)
 	_flash_mat.emission_enabled = true
 	_flash_mat.emission = Color(0.9, 0.15, 0.15)
 
 func _physics_process(delta: float) -> void:
+	if pvp_enabled and not _is_local_pvp_player():
+		global_position = global_position.lerp(pvp_target_position, minf(1.0, 18.0 * delta))
+		rotation.y = lerp_angle(rotation.y, pvp_target_rotation, minf(1.0, 18.0 * delta))
+		_apply_anim()
+		return
 	if dead:
 		return
 	attack_timer = maxf(attack_timer - delta, 0.0)
 	invuln_timer = maxf(invuln_timer - delta, 0.0)
-	_update_regen(delta)
+	if not pvp_enabled:
+		_update_regen(delta)
 	_update_buffs(delta)
 	if beak_timer > 0.0:
 		beak_timer -= delta
@@ -130,6 +146,8 @@ func _apply_anim() -> void:
 	model.position.y = absf(swing) * 0.08
 
 func _unhandled_input(event: InputEvent) -> void:
+	if pvp_enabled and not _is_local_pvp_player():
+		return
 	if dead:
 		return
 	if event is InputEventKey and event.echo:
@@ -264,6 +282,15 @@ func attack() -> void:
 func throw_beak() -> void:
 	if dead or beak_timer > 0.0:
 		return
+	if pvp_enabled:
+		beak_timer = BEAK_COOLDOWN * beak_cd_mult
+		beak.visible = false
+		if sfx:
+			sfx.play_flap()
+		if pvp_arena != null and _is_local_pvp_player():
+			var dir := Vector3(sin(rotation.y), 0.0, cos(rotation.y))
+			pvp_arena.request_pvp_beak(pvp_peer_id, beak.global_position, dir, rotation.y, beak_damage)
+		return
 	beak_timer = (0.35 if triple_timer > 0.0 else BEAK_COOLDOWN) * beak_cd_mult
 	beak.visible = false
 	if sfx:
@@ -281,6 +308,10 @@ func throw_beak() -> void:
 		proj.global_position = beak.global_position
 
 func _strike() -> void:
+	if pvp_enabled:
+		if pvp_arena != null and _is_local_pvp_player():
+			pvp_arena.request_pvp_strike(pvp_peer_id)
+		return
 	var fwd := Vector3(sin(rotation.y), 0.0, cos(rotation.y))
 	var damage := _melee_damage()
 	var melee_range := _melee_range()
@@ -297,6 +328,8 @@ func _strike() -> void:
 			sfx.play_hit()
 
 func take_damage(amount: int) -> void:
+	if pvp_enabled and not multiplayer.is_server():
+		return
 	if dead or invuln_timer > 0.0:
 		return
 	invuln_timer = HURT_INVULN
@@ -322,6 +355,47 @@ func _collect_meshes(node: Node) -> void:
 			_meshes.append(child)
 		_collect_meshes(child)
 
+func _is_local_pvp_player() -> bool:
+	return not pvp_enabled or pvp_peer_id == multiplayer.get_unique_id()
+
+func set_pvp_remote_state(pos: Vector3, rot_y: float, new_hp: int, is_dead: bool) -> void:
+	pvp_target_position = pos
+	pvp_target_rotation = rot_y
+	set_pvp_health(new_hp, is_dead)
+
+func set_pvp_health(new_hp: int, is_dead: bool) -> void:
+	var old_hp := hp
+	var was_dead := dead
+	hp = new_hp
+	dead = is_dead
+	if hp < old_hp:
+		_flash()
+	hp_changed.emit(hp)
+	if dead and not was_dead:
+		attacking = false
+		var dt := create_tween()
+		dt.tween_property(model, "rotation:x", -1.5, 0.25)
+	elif not dead:
+		model.rotation.x = 0.0
+
+func set_pvp_color(color: Color) -> void:
+	for m in _meshes:
+		if m.name.begins_with("Eye") or m.name.begins_with("Pupil"):
+			continue
+		var mat := StandardMaterial3D.new()
+		mat.albedo_color = color
+		m.material_override = mat
+		_pvp_base_mats[m] = mat
+
+func play_pvp_attack_visual() -> void:
+	if attacking:
+		return
+	attacking = true
+	var tw := create_tween()
+	tw.tween_property(right_arm, "rotation:x", -1.9, 0.08)
+	tw.tween_property(right_arm, "rotation:x", 0.0, 0.18)
+	tw.tween_callback(func() -> void: attacking = false)
+
 func _flash() -> void:
 	for m in _meshes:
 		m.material_override = _flash_mat
@@ -330,4 +404,9 @@ func _flash() -> void:
 
 func _unflash() -> void:
 	for m in _meshes:
-		m.material_override = _gold_mat if m == beak else null
+		if m == beak and _gold_mat != null:
+			m.material_override = _gold_mat
+		elif pvp_enabled:
+			m.material_override = _pvp_base_mats.get(m)
+		else:
+			m.material_override = null

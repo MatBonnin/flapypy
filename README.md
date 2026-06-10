@@ -34,6 +34,23 @@ changements sont sauvegardés localement.
 - **Game feel** : tremblement de caméra, hit-stop, flash de dégâts, particules,
   sons à hauteur variable.
 
+## MVP PvP LAN (`scenes/pvp_arena.tscn`)
+
+Mode multijoueur local 1 a 4 joueurs sur le meme reseau :
+
+- un joueur clique **Heberger** ;
+- les autres lancent la meme scene, entrent l'IP locale de l'hote, puis cliquent
+  **Rejoindre** ;
+- la manche dure 120 secondes ;
+- l'hote est autoritaire pour les degats, les morts, le score et la fin de
+  manche ;
+- le MVP synchronise les positions, les PV, les morts, les coups de massue, les
+  lancers de bec et le classement.
+
+Limitations actuelles du MVP : pas encore de lobby avance, pas de relance sans
+recharger la scene, et les projectiles PvP restent volontairement simples
+(pas encore de triple tir reseau).
+
 ## Les jeux d'origine
 
 - `scenes/main.tscn` — le Flappy Bird **2D** classique.
