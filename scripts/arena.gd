@@ -14,6 +14,7 @@ const ACTION_ATTACK := "arena_attack"
 const ACTION_THROW_BEAK := "arena_throw_beak"
 const ACTION_JUMP := "arena_jump"
 const ACTION_PAUSE := "arena_pause"
+const ACTION_TOGGLE_VIEW := "arena_toggle_view"
 const CONTROL_BINDINGS := [
 	{"action": ACTION_MOVE_UP, "label": "Avancer", "default": KEY_Z},
 	{"action": ACTION_MOVE_DOWN, "label": "Reculer", "default": KEY_S},
@@ -22,6 +23,7 @@ const CONTROL_BINDINGS := [
 	{"action": ACTION_ATTACK, "label": "Massue", "default": KEY_E},
 	{"action": ACTION_THROW_BEAK, "label": "Lancer le bec", "default": KEY_F},
 	{"action": ACTION_JUMP, "label": "Sauter", "default": KEY_SPACE},
+	{"action": ACTION_TOGGLE_VIEW, "label": "Vue", "default": KEY_V},
 	{"action": ACTION_PAUSE, "label": "Pause", "default": KEY_ESCAPE},
 ]
 const EXTRA_BINDINGS := {
@@ -54,6 +56,8 @@ const MAP_HALF := 10.0
 const SPAWN_EDGE := 9.5
 const MAX_ALIVE := 10
 const CAMERA_OFFSET := Vector3(0, 9, 6.5)
+const FIRST_PERSON_HEIGHT := 1.28
+const FIRST_PERSON_FORWARD := 0.45
 
 const TREE_POSITIONS: Array[Vector3] = [
 	Vector3(4.5, 0, -4.5),
@@ -105,6 +109,7 @@ var settings_status: Label = null
 var control_buttons: Dictionary = {}
 var control_keys: Dictionary = {}
 var pending_rebind_action := ""
+var first_person_view := false
 
 @onready var player: CharacterBody3D = $Player
 @onready var units: Node3D = $Units
@@ -129,7 +134,7 @@ func _ready() -> void:
 	player.hit_landed.connect(func() -> void: add_shake(0.07))
 	player.died.connect(_on_player_died)
 	spawn_timer.timeout.connect(_on_spawn_tick)
-	camera.position = player.position + CAMERA_OFFSET
+	_update_camera(1.0)
 	_update_ui()
 	message_label.text = _controls_hint()
 	await get_tree().create_timer(3.0, false).timeout
@@ -140,9 +145,7 @@ func _process(delta: float) -> void:
 	if get_tree().paused:
 		return
 	shake = lerpf(shake, 0.0, 8.0 * delta)
-	var target := player.position + CAMERA_OFFSET
-	camera.position = camera.position.lerp(target, 6.0 * delta) \
-		+ Vector3(randf_range(-1, 1), randf_range(-1, 1), 0) * shake
+	_update_camera(delta)
 	if not game_over and wave_state == WaveState.ACTIVE and spawn_queue.is_empty() \
 			and get_tree().get_nodes_in_group("enemies").is_empty():
 		_begin_choice()
@@ -154,6 +157,10 @@ func _process(delta: float) -> void:
 
 func _unhandled_input(event: InputEvent) -> void:
 	if _handle_rebind_input(event):
+		return
+	if event.is_action_pressed(ACTION_TOGGLE_VIEW):
+		_toggle_first_person()
+		get_viewport().set_input_as_handled()
 		return
 	if event.is_action_pressed(ACTION_PAUSE):
 		if game_over:
@@ -421,13 +428,39 @@ func _key_name(keycode: int) -> String:
 	return text
 
 func _controls_hint() -> String:
-	return "%s / Fleches : se deplacer\n%s : massue   %s : lancer le bec\n%s : sauter   %s : pause / parametres" % [
+	return "%s / Fleches : se deplacer\n%s : massue   %s : lancer le bec\n%s : sauter   %s : vue   %s : pause / parametres" % [
 		_key_name(int(control_keys[ACTION_MOVE_UP])),
 		_key_name(int(control_keys[ACTION_ATTACK])),
 		_key_name(int(control_keys[ACTION_THROW_BEAK])),
 		_key_name(int(control_keys[ACTION_JUMP])),
+		_key_name(int(control_keys[ACTION_TOGGLE_VIEW])),
 		_key_name(int(control_keys[ACTION_PAUSE])),
 	]
+
+func _toggle_first_person() -> void:
+	first_person_view = not first_person_view
+	_update_local_player_visibility()
+	_update_camera(1.0)
+
+func _update_local_player_visibility() -> void:
+	if player == null:
+		return
+	player.model.visible = not first_person_view
+
+func _update_camera(delta: float) -> void:
+	if player == null:
+		return
+	if first_person_view:
+		var forward := Vector3(sin(player.rotation.y), 0.0, cos(player.rotation.y))
+		camera.global_position = player.global_position + Vector3(0, FIRST_PERSON_HEIGHT, 0) + forward * FIRST_PERSON_FORWARD
+		camera.rotation = Vector3(0.0, player.rotation.y + PI, 0.0)
+		camera.fov = 75.0
+	else:
+		var target := player.position + CAMERA_OFFSET
+		camera.position = camera.position.lerp(target, minf(1.0, 6.0 * delta)) \
+			+ Vector3(randf_range(-1, 1), randf_range(-1, 1), 0) * shake
+		camera.rotation = Vector3(-0.94, 0.0, 0.0)
+		camera.fov = 55.0
 
 func add_shake(amount: float) -> void:
 	shake = minf(shake + amount, 0.5)

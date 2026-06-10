@@ -32,6 +32,7 @@ const ACTION_ATTACK := "arena_attack"
 const ACTION_THROW_BEAK := "arena_throw_beak"
 const ACTION_JUMP := "arena_jump"
 const ACTION_PAUSE := "arena_pause"
+const ACTION_TOGGLE_VIEW := "arena_toggle_view"
 const CONTROL_BINDINGS := [
 	{"action": ACTION_MOVE_UP, "label": "Avancer", "default": KEY_Z},
 	{"action": ACTION_MOVE_DOWN, "label": "Reculer", "default": KEY_S},
@@ -40,6 +41,7 @@ const CONTROL_BINDINGS := [
 	{"action": ACTION_ATTACK, "label": "Massue / Deguisement", "default": KEY_E},
 	{"action": ACTION_THROW_BEAK, "label": "Lancer le bec", "default": KEY_F},
 	{"action": ACTION_JUMP, "label": "Sauter", "default": KEY_SPACE},
+	{"action": ACTION_TOGGLE_VIEW, "label": "Vue", "default": KEY_V},
 	{"action": ACTION_PAUSE, "label": "Parametres", "default": KEY_ESCAPE},
 ]
 const EXTRA_BINDINGS := {
@@ -63,6 +65,8 @@ const PLAYER_COLORS: Array[Color] = [
 ]
 const SEEKER_COLOR := Color(0.95, 0.2, 0.2)
 const HOUSE_POSITION := Vector3(-4.0, 0, -4.5)
+const FIRST_PERSON_HEIGHT := 1.28
+const FIRST_PERSON_FORWARD := 0.45
 
 enum Phase { LOBBY, HIDE, HUNT, OVER }
 enum Prop { TREE, ROCK, BARREL, CRATE, HAY, STUMP, BUSH, PUMPKIN }
@@ -85,6 +89,7 @@ var phase_time_left := 0.0
 var round_index := -1
 var state_send_timer := 0.0
 var prop_move_timer := 0.0
+var first_person_view := false
 
 var ui_layer: CanvasLayer
 var menu_panel: PanelContainer
@@ -131,6 +136,10 @@ func _input(event: InputEvent) -> void:
 			get_viewport().set_input_as_handled()
 		elif event is InputEventKey:
 			get_viewport().set_input_as_handled()
+		return
+	if event.is_action_pressed(ACTION_TOGGLE_VIEW):
+		_toggle_first_person()
+		get_viewport().set_input_as_handled()
 		return
 	if event.is_action_pressed(ACTION_PAUSE):
 		_show_controls_panel(false)
@@ -691,6 +700,8 @@ func _client_spawn_player(peer_id: int, display_name: String, spawn_pos: Vector3
 	if players.has(peer_id):
 		var existing: CharacterBody3D = players[peer_id]
 		existing.set_pvp_remote_state(spawn_pos, existing.rotation.y, hp_value, is_dead)
+		if peer_id == multiplayer.get_unique_id():
+			_update_local_player_visibility()
 		return
 	var player: CharacterBody3D = BirdmanScene.instantiate()
 	player.name = "Player_%d" % peer_id
@@ -705,6 +716,8 @@ func _client_spawn_player(peer_id: int, display_name: String, spawn_pos: Vector3
 	player.set_pvp_color(_base_color(peer_id))
 	player.set_pvp_health(hp_value, is_dead)
 	players[peer_id] = player
+	if peer_id == multiplayer.get_unique_id():
+		_update_local_player_visibility()
 
 @rpc("authority", "call_local", "reliable")
 func _client_remove_player(peer_id: int) -> void:
@@ -814,6 +827,8 @@ func _client_set_morph(peer_id: int, prop_type: int) -> void:
 	else:
 		player.model.visible = true
 		player.speed_mult = SEEKER_SPEED_MULT if peer_id == seeker_id else 1.0
+	if peer_id == multiplayer.get_unique_id():
+		_update_local_player_visibility()
 
 func _clear_morph_visual(player: Node) -> void:
 	for child in player.get_children():
@@ -976,6 +991,8 @@ func _client_round_setup(new_seeker_id: int, ids: Array, positions: Array, hps: 
 		else:
 			player.set_pvp_color(_base_color(id))
 			player.speed_mult = 1.0
+		if id == multiplayer.get_unique_id():
+			_update_local_player_visibility()
 	if multiplayer.get_unique_id() == seeker_id:
 		_set_local_frozen(true)
 		seeker_overlay.visible = true
@@ -1018,6 +1035,7 @@ func _client_phase_changed(new_phase: int) -> void:
 				message_label.text = "Retour au lobby. Clique « Lancer la manche » quand tout le monde est la."
 			else:
 				message_label.text = "Retour au lobby. L'hote peut relancer une manche."
+	_update_local_player_visibility()
 
 @rpc("authority", "unreliable")
 func _client_phase_time(time_left: float) -> void:
@@ -1157,8 +1175,37 @@ func _update_camera(delta: float) -> void:
 	var player: CharacterBody3D = players.get(local_id)
 	if player == null:
 		return
-	var target := player.position + CAMERA_OFFSET
-	camera.position = camera.position.lerp(target, minf(1.0, 6.0 * delta))
+	if first_person_view:
+		var forward := Vector3(sin(player.rotation.y), 0.0, cos(player.rotation.y))
+		camera.global_position = player.global_position + Vector3(0, FIRST_PERSON_HEIGHT, 0) + forward * FIRST_PERSON_FORWARD
+		camera.rotation = Vector3(0.0, player.rotation.y + PI, 0.0)
+		camera.fov = 75.0
+	else:
+		var target := player.position + CAMERA_OFFSET
+		camera.position = camera.position.lerp(target, minf(1.0, 6.0 * delta))
+		camera.rotation = Vector3(-0.94, 0.0, 0.0)
+		camera.fov = 55.0
+
+func _toggle_first_person() -> void:
+	first_person_view = not first_person_view
+	_update_local_player_visibility()
+	_update_camera(1.0)
+
+func _update_local_player_visibility() -> void:
+	var local_id := multiplayer.get_unique_id() if multiplayer.multiplayer_peer != null else 0
+	var player: CharacterBody3D = players.get(local_id)
+	if player == null:
+		return
+	var morphed := int(morphs.get(local_id, -1)) >= 0
+	var morph_visual: Node3D = player.get_node_or_null("MorphVisual")
+	if first_person_view:
+		player.model.visible = false
+		if morph_visual != null:
+			morph_visual.visible = false
+	else:
+		player.model.visible = not morphed
+		if morph_visual != null:
+			morph_visual.visible = morphed
 
 func _update_hud() -> void:
 	match phase:

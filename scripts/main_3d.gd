@@ -8,6 +8,7 @@ const GAP_CENTER_MAX := 8.6
 const BIRD_START_Y := 6.0
 const SPAWN_X := 8.0
 const RESTART_DELAY_MS := 600
+const FIRST_PERSON_OFFSET := Vector3(0.5, 0.12, 0.0)
 
 enum State { READY, PLAYING, DEAD }
 
@@ -16,9 +17,11 @@ var score := 0
 var best := 0
 var death_time := 0
 var hover_time := 0.0
+var first_person_view := false
 
 @onready var bird: Area3D = $Bird
 @onready var pipes: Node3D = $Pipes
+@onready var camera: Camera3D = $Camera3D
 @onready var spawn_timer: Timer = $PipeSpawnTimer
 @onready var score_label: Label = $UI/ScoreLabel
 @onready var message_label: Label = $UI/MessageLabel
@@ -29,9 +32,13 @@ func _ready() -> void:
 	bird.area_entered.connect(_on_bird_area_entered)
 	spawn_timer.timeout.connect(_spawn_pipe_pair)
 	score_label.text = "0"
-	message_label.text = "Espace ou clic pour voler\nÉchap : menu\nRecord : %d" % best
+	message_label.text = "Espace ou clic pour voler\nV : vue premiere personne\nÉchap : menu\nRecord : %d" % best
 
 func _unhandled_input(event: InputEvent) -> void:
+	if event is InputEventKey and event.pressed and not event.echo and event.physical_keycode == KEY_V:
+		_toggle_first_person()
+		get_viewport().set_input_as_handled()
+		return
 	if event.is_action_pressed("ui_cancel"):
 		get_tree().change_scene_to_file("res://scenes/menu.tscn")
 		return
@@ -63,6 +70,27 @@ func _process(delta: float) -> void:
 		bird.active = false
 		if state == State.PLAYING:
 			_die()
+	_update_camera()
+
+func _toggle_first_person() -> void:
+	first_person_view = not first_person_view
+	_set_bird_visual_visible(not first_person_view)
+	_update_camera()
+
+func _set_bird_visual_visible(value: bool) -> void:
+	for child in bird.get_children():
+		if child is MeshInstance3D:
+			child.visible = value
+
+func _update_camera() -> void:
+	if first_person_view:
+		camera.global_position = bird.global_position + FIRST_PERSON_OFFSET
+		camera.rotation = Vector3(0.0, -PI / 2.0, 0.0)
+		camera.fov = 66.0
+	else:
+		camera.position = Vector3(0, 6, 16)
+		camera.rotation = Vector3.ZERO
+		camera.fov = 50.0
 
 func _start_game() -> void:
 	state = State.PLAYING

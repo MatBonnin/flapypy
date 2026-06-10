@@ -24,6 +24,7 @@ const ACTION_ATTACK := "arena_attack"
 const ACTION_THROW_BEAK := "arena_throw_beak"
 const ACTION_JUMP := "arena_jump"
 const ACTION_PAUSE := "arena_pause"
+const ACTION_TOGGLE_VIEW := "arena_toggle_view"
 const CONTROL_BINDINGS := [
 	{"action": ACTION_MOVE_UP, "label": "Avancer", "default": KEY_Z},
 	{"action": ACTION_MOVE_DOWN, "label": "Reculer", "default": KEY_S},
@@ -32,6 +33,7 @@ const CONTROL_BINDINGS := [
 	{"action": ACTION_ATTACK, "label": "Massue", "default": KEY_E},
 	{"action": ACTION_THROW_BEAK, "label": "Lancer le bec", "default": KEY_F},
 	{"action": ACTION_JUMP, "label": "Sauter", "default": KEY_SPACE},
+	{"action": ACTION_TOGGLE_VIEW, "label": "Vue", "default": KEY_V},
 	{"action": ACTION_PAUSE, "label": "Parametres", "default": KEY_ESCAPE},
 ]
 const EXTRA_BINDINGS := {
@@ -80,6 +82,8 @@ const ROCK_POSITIONS: Array[Vector3] = [
 	Vector3(-1.0, 0, -4.8),
 ]
 const HOUSE_POSITION := Vector3(-4.0, 0, -4.5)
+const FIRST_PERSON_HEIGHT := 1.28
+const FIRST_PERSON_FORWARD := 0.45
 const PICKUP_POSITIONS: Array[Vector3] = [
 	Vector3(0.0, 0.45, 0.0),
 	Vector3(2.7, 0.45, 2.5),
@@ -111,6 +115,7 @@ var match_over := false
 var match_time_left := MATCH_SECONDS
 var state_send_timer := 0.0
 var pickup_spawn_timer := 2.0
+var first_person_view := false
 
 var ui_layer: CanvasLayer
 var menu_panel: PanelContainer
@@ -151,6 +156,10 @@ func _input(event: InputEvent) -> void:
 			get_viewport().set_input_as_handled()
 		elif event is InputEventKey:
 			get_viewport().set_input_as_handled()
+		return
+	if event.is_action_pressed(ACTION_TOGGLE_VIEW):
+		_toggle_first_person()
+		get_viewport().set_input_as_handled()
 		return
 	if event.is_action_pressed(ACTION_PAUSE):
 		_show_controls_panel(false)
@@ -707,6 +716,8 @@ func _client_spawn_player(peer_id: int, display_name: String, spawn_pos: Vector3
 	if players.has(peer_id):
 		var existing: CharacterBody3D = players[peer_id]
 		existing.set_pvp_remote_state(spawn_pos, existing.rotation.y, hp_value, is_dead)
+		if peer_id == multiplayer.get_unique_id():
+			_update_local_player_visibility()
 		return
 	var player: CharacterBody3D = BirdmanScene.instantiate()
 	player.name = "Player_%d" % peer_id
@@ -726,6 +737,8 @@ func _client_spawn_player(peer_id: int, display_name: String, spawn_pos: Vector3
 			_check_last_player()
 	)
 	players[peer_id] = player
+	if peer_id == multiplayer.get_unique_id():
+		_update_local_player_visibility()
 
 @rpc("authority", "call_local", "reliable")
 func _client_remove_player(peer_id: int) -> void:
@@ -762,6 +775,8 @@ func _client_respawn_player(peer_id: int, spawn_pos: Vector3, hp_value: int) -> 
 	if player == null:
 		return
 	player.pvp_respawn(spawn_pos, hp_value)
+	if peer_id == multiplayer.get_unique_id():
+		_update_local_player_visibility()
 
 func _update_server_respawns() -> void:
 	var now := float(Time.get_ticks_msec()) / 1000.0
@@ -1188,8 +1203,27 @@ func _update_camera(delta: float) -> void:
 	var player: CharacterBody3D = players.get(local_id)
 	if player == null:
 		return
-	var target := player.position + CAMERA_OFFSET
-	camera.position = camera.position.lerp(target, minf(1.0, 6.0 * delta))
+	if first_person_view:
+		var forward := Vector3(sin(player.rotation.y), 0.0, cos(player.rotation.y))
+		camera.global_position = player.global_position + Vector3(0, FIRST_PERSON_HEIGHT, 0) + forward * FIRST_PERSON_FORWARD
+		camera.rotation = Vector3(0.0, player.rotation.y + PI, 0.0)
+		camera.fov = 75.0
+	else:
+		var target := player.position + CAMERA_OFFSET
+		camera.position = camera.position.lerp(target, minf(1.0, 6.0 * delta))
+		camera.rotation = Vector3(-0.94, 0.0, 0.0)
+		camera.fov = 55.0
+
+func _toggle_first_person() -> void:
+	first_person_view = not first_person_view
+	_update_local_player_visibility()
+	_update_camera(1.0)
+
+func _update_local_player_visibility() -> void:
+	var local_id := multiplayer.get_unique_id() if multiplayer.multiplayer_peer != null else 0
+	var player: CharacterBody3D = players.get(local_id)
+	if player != null:
+		player.model.visible = not first_person_view
 
 func _update_hud() -> void:
 	timer_label.text = "Temps : %03d" % int(ceil(match_time_left))
