@@ -29,9 +29,12 @@ func _ready() -> void:
 	bird.area_entered.connect(_on_bird_area_entered)
 	spawn_timer.timeout.connect(_spawn_pipe_pair)
 	score_label.text = "0"
-	message_label.text = "Espace ou clic pour voler\nRecord : %d" % best
+	message_label.text = "Espace ou clic pour voler\nÉchap : menu\nRecord : %d" % best
 
 func _unhandled_input(event: InputEvent) -> void:
+	if event.is_action_pressed("ui_cancel"):
+		get_tree().change_scene_to_file("res://scenes/menu.tscn")
+		return
 	if not _is_flap_input(event):
 		return
 	match state:

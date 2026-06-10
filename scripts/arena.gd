@@ -156,7 +156,10 @@ func _unhandled_input(event: InputEvent) -> void:
 	if _handle_rebind_input(event):
 		return
 	if event.is_action_pressed(ACTION_PAUSE):
-		_set_paused(not get_tree().paused)
+		if game_over:
+			get_tree().change_scene_to_file("res://scenes/menu.tscn")
+		else:
+			_set_paused(not get_tree().paused)
 		get_viewport().set_input_as_handled()
 		return
 	if get_tree().paused:
@@ -236,6 +239,13 @@ func _build_pause_menu() -> void:
 		get_tree().reload_current_scene()
 	)
 	pause_page.add_child(quit_button)
+
+	var main_menu_button := _make_menu_button("Menu principal")
+	main_menu_button.pressed.connect(func() -> void:
+		_set_paused(false)
+		get_tree().change_scene_to_file("res://scenes/menu.tscn")
+	)
+	pause_page.add_child(main_menu_button)
 
 	settings_page = VBoxContainer.new()
 	settings_page.visible = false
@@ -552,7 +562,7 @@ func _on_player_died() -> void:
 	if kills > best:
 		best = kills
 		_save_best()
-	message_label.text = "Game Over à la vague %d\nTués : %d   Record : %d\nEntrée pour rejouer" % [wave, kills, best]
+	message_label.text = "Game Over à la vague %d\nTués : %d   Record : %d\nEntrée pour rejouer — Échap pour le menu" % [wave, kills, best]
 
 func _spawn_pickup(pos: Vector3) -> void:
 	var pickup: Area3D = PickupScene.instantiate()

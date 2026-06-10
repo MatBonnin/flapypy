@@ -308,6 +308,12 @@ func _build_ui() -> void:
 	settings_button.pressed.connect(_show_controls_panel.bind(true))
 	root.add_child(settings_button)
 
+	var main_menu_button := Button.new()
+	main_menu_button.text = "Menu principal"
+	main_menu_button.custom_minimum_size = Vector2(0, 38)
+	main_menu_button.pressed.connect(_back_to_main_menu)
+	root.add_child(main_menu_button)
+
 	status_label = Label.new()
 	status_label.text = "Meme reseau : l'hote clique Heberger, les autres entrent son IP locale.\n%s" % _local_network_hint()
 	status_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -400,6 +406,12 @@ func _build_controls_panel() -> void:
 	back_button.custom_minimum_size = Vector2(260, 38)
 	back_button.pressed.connect(_hide_controls_panel)
 	root.add_child(back_button)
+
+	var leave_button := Button.new()
+	leave_button.text = "Quitter vers le menu"
+	leave_button.custom_minimum_size = Vector2(260, 38)
+	leave_button.pressed.connect(_back_to_main_menu)
+	root.add_child(leave_button)
 
 func _show_controls_panel(return_to_menu: bool) -> void:
 	controls_return_to_menu = return_to_menu
@@ -512,6 +524,13 @@ func _is_private_ipv4(address: String) -> bool:
 		var second := int(parts[1])
 		return second >= 16 and second <= 31
 	return false
+
+func _back_to_main_menu() -> void:
+	if multiplayer.multiplayer_peer != null:
+		multiplayer.multiplayer_peer.close()
+		multiplayer.multiplayer_peer = null
+	peer = null
+	get_tree().change_scene_to_file("res://scenes/menu.tscn")
 
 func _host_game() -> void:
 	peer = ENetMultiplayerPeer.new()
