@@ -5,6 +5,31 @@ extends Node3D
 const PipemanScene := preload("res://scenes/pipeman.tscn")
 const PickupScene := preload("res://scenes/pickup.tscn")
 const SAVE_PATH := "user://highscore.cfg"
+const SETTINGS_PATH := "user://settings.cfg"
+const ACTION_MOVE_UP := "arena_move_up"
+const ACTION_MOVE_DOWN := "arena_move_down"
+const ACTION_MOVE_LEFT := "arena_move_left"
+const ACTION_MOVE_RIGHT := "arena_move_right"
+const ACTION_ATTACK := "arena_attack"
+const ACTION_THROW_BEAK := "arena_throw_beak"
+const ACTION_JUMP := "arena_jump"
+const ACTION_PAUSE := "arena_pause"
+const CONTROL_BINDINGS := [
+	{"action": ACTION_MOVE_UP, "label": "Avancer", "default": KEY_Z},
+	{"action": ACTION_MOVE_DOWN, "label": "Reculer", "default": KEY_S},
+	{"action": ACTION_MOVE_LEFT, "label": "Gauche", "default": KEY_Q},
+	{"action": ACTION_MOVE_RIGHT, "label": "Droite", "default": KEY_D},
+	{"action": ACTION_ATTACK, "label": "Massue", "default": KEY_E},
+	{"action": ACTION_THROW_BEAK, "label": "Lancer le bec", "default": KEY_F},
+	{"action": ACTION_JUMP, "label": "Sauter", "default": KEY_SPACE},
+	{"action": ACTION_PAUSE, "label": "Pause", "default": KEY_ESCAPE},
+]
+const EXTRA_BINDINGS := {
+	ACTION_MOVE_UP: [KEY_UP],
+	ACTION_MOVE_DOWN: [KEY_DOWN],
+	ACTION_MOVE_LEFT: [KEY_LEFT],
+	ACTION_MOVE_RIGHT: [KEY_RIGHT],
+}
 
 const DROP_CHANCE := 0.35
 ## Doit suivre l'ordre de l'enum Pickup de player.gd.
@@ -73,6 +98,13 @@ var prev_hp := 0
 var boss: Pipeman = null
 var boss_bar: Control = null
 var boss_fill: ColorRect = null
+var pause_overlay: Control = null
+var pause_page: Control = null
+var settings_page: Control = null
+var settings_status: Label = null
+var control_buttons: Dictionary = {}
+var control_keys: Dictionary = {}
+var pending_rebind_action := ""
 
 @onready var player: CharacterBody3D = $Player
 @onready var units: Node3D = $Units
@@ -85,9 +117,12 @@ var boss_fill: ColorRect = null
 @onready var sfx: Node = $Sfx
 
 func _ready() -> void:
+	process_mode = Node.PROCESS_MODE_ALWAYS
+	_load_controls()
 	best = _load_best()
 	_build_map()
 	_build_boss_bar()
+	_build_pause_menu()
 	prev_hp = player.hp
 	player.sfx = sfx
 	player.hp_changed.connect(_on_player_hp_changed)
@@ -96,12 +131,14 @@ func _ready() -> void:
 	spawn_timer.timeout.connect(_on_spawn_tick)
 	camera.position = player.position + CAMERA_OFFSET
 	_update_ui()
-	message_label.text = "ZQSD / Flèches : se déplacer\nE : massue   F : lancer le bec\nEspace : sauter (esquive les coups)"
-	await get_tree().create_timer(3.0).timeout
+	message_label.text = _controls_hint()
+	await get_tree().create_timer(3.0, false).timeout
 	if not game_over:
 		_start_wave(1)
 
 func _process(delta: float) -> void:
+	if get_tree().paused:
+		return
 	shake = lerpf(shake, 0.0, 8.0 * delta)
 	var target := player.position + CAMERA_OFFSET
 	camera.position = camera.position.lerp(target, 6.0 * delta) \
@@ -116,6 +153,14 @@ func _process(delta: float) -> void:
 		boss_fill.size.x = 436.0 * float(maxi(boss.hp, 0)) / float(boss.max_hp_value)
 
 func _unhandled_input(event: InputEvent) -> void:
+	if _handle_rebind_input(event):
+		return
+	if event.is_action_pressed(ACTION_PAUSE):
+		_set_paused(not get_tree().paused)
+		get_viewport().set_input_as_handled()
+		return
+	if get_tree().paused:
+		return
 	if game_over:
 		if event.is_action_pressed("ui_accept"):
 			get_tree().reload_current_scene()
@@ -134,6 +179,245 @@ func _unhandled_input(event: InputEvent) -> void:
 			sfx.play_score()
 			_update_ui()
 			_start_wave(wave + 1)
+
+func _build_pause_menu() -> void:
+	pause_overlay = Control.new()
+	pause_overlay.name = "PauseMenu"
+	pause_overlay.visible = false
+	pause_overlay.process_mode = Node.PROCESS_MODE_ALWAYS
+	pause_overlay.set_anchors_preset(Control.PRESET_FULL_RECT)
+	$UI.add_child(pause_overlay)
+
+	var dim := ColorRect.new()
+	dim.color = Color(0, 0, 0, 0.62)
+	dim.set_anchors_preset(Control.PRESET_FULL_RECT)
+	pause_overlay.add_child(dim)
+
+	var center := CenterContainer.new()
+	center.set_anchors_preset(Control.PRESET_FULL_RECT)
+	pause_overlay.add_child(center)
+
+	var panel := PanelContainer.new()
+	panel.custom_minimum_size = Vector2(520, 0)
+	center.add_child(panel)
+
+	var margin := MarginContainer.new()
+	margin.add_theme_constant_override("margin_left", 28)
+	margin.add_theme_constant_override("margin_top", 24)
+	margin.add_theme_constant_override("margin_right", 28)
+	margin.add_theme_constant_override("margin_bottom", 24)
+	panel.add_child(margin)
+
+	var root := VBoxContainer.new()
+	root.add_theme_constant_override("separation", 14)
+	margin.add_child(root)
+
+	var title := Label.new()
+	title.text = "Pause"
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title.add_theme_font_size_override("font_size", 34)
+	root.add_child(title)
+
+	pause_page = VBoxContainer.new()
+	pause_page.add_theme_constant_override("separation", 10)
+	root.add_child(pause_page)
+
+	var resume_button := _make_menu_button("Reprendre")
+	resume_button.pressed.connect(func() -> void: _set_paused(false))
+	pause_page.add_child(resume_button)
+
+	var settings_button := _make_menu_button("Parametres")
+	settings_button.pressed.connect(_show_settings_page)
+	pause_page.add_child(settings_button)
+
+	var quit_button := _make_menu_button("Recommencer")
+	quit_button.pressed.connect(func() -> void:
+		_set_paused(false)
+		get_tree().reload_current_scene()
+	)
+	pause_page.add_child(quit_button)
+
+	settings_page = VBoxContainer.new()
+	settings_page.visible = false
+	settings_page.add_theme_constant_override("separation", 9)
+	root.add_child(settings_page)
+
+	settings_status = Label.new()
+	settings_status.text = "Clique une action, puis appuie sur une touche."
+	settings_status.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	settings_status.add_theme_font_size_override("font_size", 16)
+	settings_page.add_child(settings_status)
+
+	for binding in CONTROL_BINDINGS:
+		var row := HBoxContainer.new()
+		row.add_theme_constant_override("separation", 12)
+		settings_page.add_child(row)
+
+		var label := Label.new()
+		label.text = binding["label"]
+		label.custom_minimum_size = Vector2(220, 32)
+		label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		row.add_child(label)
+
+		var button := Button.new()
+		button.text = _key_name(int(control_keys[binding["action"]]))
+		button.custom_minimum_size = Vector2(180, 32)
+		button.pressed.connect(_begin_rebind.bind(binding["action"]))
+		row.add_child(button)
+		control_buttons[binding["action"]] = button
+
+	var reset_button := _make_menu_button("Touches par defaut")
+	reset_button.pressed.connect(_reset_controls)
+	settings_page.add_child(reset_button)
+
+	var back_button := _make_menu_button("Retour")
+	back_button.pressed.connect(_show_pause_page)
+	settings_page.add_child(back_button)
+
+func _make_menu_button(text: String) -> Button:
+	var button := Button.new()
+	button.text = text
+	button.custom_minimum_size = Vector2(260, 42)
+	button.add_theme_font_size_override("font_size", 20)
+	return button
+
+func _show_pause_page() -> void:
+	pending_rebind_action = ""
+	if pause_page:
+		pause_page.visible = true
+	if settings_page:
+		settings_page.visible = false
+	if settings_status:
+		settings_status.text = "Clique une action, puis appuie sur une touche."
+	_update_control_buttons()
+
+func _show_settings_page() -> void:
+	pending_rebind_action = ""
+	pause_page.visible = false
+	settings_page.visible = true
+	settings_status.text = "Clique une action, puis appuie sur une touche."
+	_update_control_buttons()
+
+func _set_paused(value: bool) -> void:
+	if game_over and value:
+		return
+	pending_rebind_action = ""
+	get_tree().paused = value
+	pause_overlay.visible = value
+	if value:
+		_show_pause_page()
+
+func _begin_rebind(action: String) -> void:
+	pending_rebind_action = action
+	settings_status.text = "Appuie sur la nouvelle touche pour %s." % _action_label(action)
+	_update_control_buttons()
+	if control_buttons.has(action):
+		control_buttons[action].text = "..."
+
+func _handle_rebind_input(event: InputEvent) -> bool:
+	if pending_rebind_action == "":
+		return false
+	if event is InputEventKey and event.pressed and not event.echo:
+		var keycode: int = event.physical_keycode
+		if keycode == KEY_NONE:
+			keycode = event.keycode
+		_apply_rebind(pending_rebind_action, keycode)
+		pending_rebind_action = ""
+		settings_status.text = "Touches enregistrees."
+		get_viewport().set_input_as_handled()
+		return true
+	return false
+
+func _apply_rebind(action: String, keycode: int) -> void:
+	if keycode == KEY_NONE:
+		return
+	var swapped_action := _action_for_key(keycode)
+	var old_key := int(control_keys[action])
+	if swapped_action != "" and swapped_action != action:
+		control_keys[swapped_action] = old_key
+		_apply_action_key(swapped_action, old_key)
+	control_keys[action] = keycode
+	_apply_action_key(action, keycode)
+	_save_controls()
+	_update_control_buttons()
+	message_label.text = _controls_hint()
+
+func _reset_controls() -> void:
+	for binding in CONTROL_BINDINGS:
+		var action: String = binding["action"]
+		var keycode := int(binding["default"])
+		control_keys[action] = keycode
+		_apply_action_key(action, keycode)
+	_save_controls()
+	pending_rebind_action = ""
+	settings_status.text = "Touches par defaut restaurees."
+	_update_control_buttons()
+	message_label.text = _controls_hint()
+
+func _load_controls() -> void:
+	var cfg := ConfigFile.new()
+	var loaded := cfg.load(SETTINGS_PATH) == OK
+	for binding in CONTROL_BINDINGS:
+		var action: String = binding["action"]
+		var keycode := int(binding["default"])
+		if loaded:
+			keycode = int(cfg.get_value("controls", action, keycode))
+		control_keys[action] = keycode
+		_apply_action_key(action, keycode)
+
+func _save_controls() -> void:
+	var cfg := ConfigFile.new()
+	for binding in CONTROL_BINDINGS:
+		var action: String = binding["action"]
+		cfg.set_value("controls", action, int(control_keys[action]))
+	cfg.save(SETTINGS_PATH)
+
+func _apply_action_key(action: String, keycode: int) -> void:
+	if not InputMap.has_action(action):
+		InputMap.add_action(action)
+	InputMap.action_erase_events(action)
+	var event := InputEventKey.new()
+	event.physical_keycode = keycode
+	InputMap.action_add_event(action, event)
+	for extra_key in EXTRA_BINDINGS.get(action, []):
+		if int(extra_key) != keycode:
+			var extra_event := InputEventKey.new()
+			extra_event.physical_keycode = int(extra_key)
+			InputMap.action_add_event(action, extra_event)
+
+func _update_control_buttons() -> void:
+	for binding in CONTROL_BINDINGS:
+		var action: String = binding["action"]
+		if control_buttons.has(action):
+			control_buttons[action].text = _key_name(int(control_keys[action]))
+
+func _action_label(action: String) -> String:
+	for binding in CONTROL_BINDINGS:
+		if binding["action"] == action:
+			return binding["label"]
+	return action
+
+func _action_for_key(keycode: int) -> String:
+	for binding in CONTROL_BINDINGS:
+		var action: String = binding["action"]
+		if int(control_keys.get(action, KEY_NONE)) == keycode:
+			return action
+	return ""
+
+func _key_name(keycode: int) -> String:
+	var text := OS.get_keycode_string(keycode)
+	if text == "":
+		return str(keycode)
+	return text
+
+func _controls_hint() -> String:
+	return "%s / Fleches : se deplacer\n%s : massue   %s : lancer le bec\n%s : sauter   %s : pause / parametres" % [
+		_key_name(int(control_keys[ACTION_MOVE_UP])),
+		_key_name(int(control_keys[ACTION_ATTACK])),
+		_key_name(int(control_keys[ACTION_THROW_BEAK])),
+		_key_name(int(control_keys[ACTION_JUMP])),
+		_key_name(int(control_keys[ACTION_PAUSE])),
+	]
 
 func add_shake(amount: float) -> void:
 	shake = minf(shake + amount, 0.5)
@@ -157,7 +441,7 @@ func _start_wave(n: int) -> void:
 	else:
 		message_label.text = "VAGUE %d" % n
 	_update_ui()
-	await get_tree().create_timer(2.0).timeout
+	await get_tree().create_timer(2.0, false).timeout
 	if game_over:
 		return
 	message_label.text = ""
@@ -297,7 +581,7 @@ func _on_pickup_collected(type: int) -> void:
 
 func _show_popup(text: String) -> void:
 	message_label.text = text
-	get_tree().create_timer(2.2).timeout.connect(func() -> void:
+	get_tree().create_timer(2.2, false).timeout.connect(func() -> void:
 		if not game_over and message_label.text == text:
 			message_label.text = "")
 
@@ -323,7 +607,7 @@ func _spawn_burst(pos: Vector3, color: Color, amount := 16, scale_f := 1.0) -> v
 	p.mesh = mesh
 	p.position = pos + Vector3(0, 0.6, 0)
 	add_child(p)
-	get_tree().create_timer(1.5).timeout.connect(p.queue_free)
+	get_tree().create_timer(1.5, false).timeout.connect(p.queue_free)
 
 # --- Construction de la map ---
 

@@ -16,8 +16,12 @@ bonhommes-tuyaux dans une petite plaine (murs, arbres, rochers, maison).
 | **E** | Coup de massue |
 | **F** | Lancer son bec comme projectile |
 | **Espace** | Sauter (esquive les attaques au sol) |
+| **Échap** | Pause et paramètres des touches |
 | **1 / 2 / 3** | Choisir une amélioration entre deux vagues |
 | **Entrée** | Rejouer après un game over |
+
+Les touches de l'arène sont configurables depuis **Pause → Paramètres**. Les
+changements sont sauvegardés localement.
 
 ### Contenu
 

@@ -19,6 +19,13 @@ const ATTACK_COOLDOWN := 0.45
 const BEAK_COOLDOWN := 0.7
 const HURT_INVULN := 0.8
 const MAX_HP := 8
+const ACTION_MOVE_UP := "arena_move_up"
+const ACTION_MOVE_DOWN := "arena_move_down"
+const ACTION_MOVE_LEFT := "arena_move_left"
+const ACTION_MOVE_RIGHT := "arena_move_right"
+const ACTION_ATTACK := "arena_attack"
+const ACTION_THROW_BEAK := "arena_throw_beak"
+const ACTION_JUMP := "arena_jump"
 
 var hp := MAX_HP
 var max_hp := MAX_HP
@@ -78,15 +85,12 @@ func _physics_process(delta: float) -> void:
 			beak.scale = Vector3(0.1, 0.1, 0.1)
 			var tw := create_tween()
 			tw.tween_property(beak, "scale", Vector3.ONE, 0.15)
-	var input := Vector2.ZERO
-	if Input.is_physical_key_pressed(KEY_W) or Input.is_physical_key_pressed(KEY_UP):
-		input.y -= 1.0
-	if Input.is_physical_key_pressed(KEY_S) or Input.is_physical_key_pressed(KEY_DOWN):
-		input.y += 1.0
-	if Input.is_physical_key_pressed(KEY_A) or Input.is_physical_key_pressed(KEY_LEFT):
-		input.x -= 1.0
-	if Input.is_physical_key_pressed(KEY_D) or Input.is_physical_key_pressed(KEY_RIGHT):
-		input.x += 1.0
+	var input := Input.get_vector(
+		ACTION_MOVE_LEFT,
+		ACTION_MOVE_RIGHT,
+		ACTION_MOVE_UP,
+		ACTION_MOVE_DOWN
+	)
 	var dir := Vector3.ZERO
 	if input != Vector2.ZERO:
 		dir = Vector3(input.x, 0.0, input.y).normalized()
@@ -123,13 +127,14 @@ func _apply_anim() -> void:
 func _unhandled_input(event: InputEvent) -> void:
 	if dead:
 		return
-	if event is InputEventKey and event.pressed and not event.echo:
-		if event.physical_keycode == KEY_E:
-			attack()
-		elif event.physical_keycode == KEY_F:
-			throw_beak()
-		elif event.physical_keycode == KEY_SPACE:
-			jump()
+	if event is InputEventKey and event.echo:
+		return
+	if event.is_action_pressed(ACTION_ATTACK):
+		attack()
+	elif event.is_action_pressed(ACTION_THROW_BEAK):
+		throw_beak()
+	elif event.is_action_pressed(ACTION_JUMP):
+		jump()
 	elif event is InputEventMouseButton and event.pressed:
 		if event.button_index == MOUSE_BUTTON_LEFT:
 			attack()
