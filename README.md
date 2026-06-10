@@ -3,7 +3,23 @@
 Un projet de jeux 3D faits avec **Godot 4.6**, parti d'un clone de Flappy Bird
 qui a fini en arène de baston roguelite contre des bonhommes-tuyaux. 🐤🥖
 
-## Le jeu principal : l'arène (`scenes/arena.tscn`)
+## Menu principal (`scenes/menu.tscn`)
+
+C'est la scène lancée par défaut (**F5**). Elle permet de choisir le mode de
+jeu :
+
+- **Flappy Bird 3D** — le clone vu de côté (`scenes/main_3d.tscn`) ;
+- **Arène solo** — vagues d'ennemis et améliorations roguelite
+  (`scenes/arena.tscn`) ;
+- **PvP LAN** — multijoueur local 1 à 4 joueurs (`scenes/pvp_arena.tscn`) ;
+- **Prop Hunt LAN** — cache-cache déguisé en objets, 2 à 4 joueurs
+  (`scenes/prop_hunt.tscn`).
+
+Chaque mode permet de revenir au menu : **Échap** dans le Flappy 3D,
+**Pause → Menu principal** dans l'arène (ou **Échap** après un game over), et
+le bouton **Menu principal** ou **Quitter vers le menu** côté PvP.
+
+## L'arène solo (`scenes/arena.tscn`)
 
 Un oiseau Flappy avec bras, jambes et massue affronte des vagues de
 bonhommes-tuyaux dans une petite plaine (murs, arbres, rochers, maison).
@@ -72,18 +88,41 @@ Le PvP utilise ENet en UDP sur le port **42424**.
 - Pour exporter directement le PvP, verifier que la scene principale du projet
   est `res://scenes/pvp_arena.tscn` avant de refaire l'EXE.
 
-## Les jeux d'origine
+## Prop Hunt LAN (`scenes/prop_hunt.tscn`)
 
-- `scenes/main.tscn` — le Flappy Bird **2D** classique.
-- `scenes/main_3d.tscn` — la version **3D** vue de côté.
+Un cache-cache à la *prop hunt* de Garry's Mod, 2 à 4 joueurs sur le même
+réseau. La plaine est chargée d'objets : arbres, rochers, tonneaux, caisses,
+bottes de foin, souches, buissons, citrouilles (et la maison en décor).
 
-Ces deux scènes sont en format portrait (480×800) ; l'arène est en paysage PC.
-Pour changer le jeu lancé par défaut : *Projet → Paramètres → Application → Run →
-Main Scene*.
+Déroulé d'une manche :
+
+- l'hôte clique **Héberger**, les autres **Rejoindre**, puis l'hôte clique
+  **Lancer la manche** (le rôle de chercheur tourne à chaque manche) ;
+- **phase de cachette (12 s)** : le chercheur a un écran noir pendant que les
+  props se placent et se déguisent ;
+- **phase de chasse (120 s)** : le chercheur traque les props et les élimine à
+  la massue (2 coups).
+
+Côté prop : **E** près d'un objet du décor pour prendre exactement son
+apparence (un prop déguisé est un peu plus lent), on peut se redéguiser, fuir
+et sauter. Côté chercheur : chaque coup de massue dans le vide ou dans un vrai
+objet coûte **1 PV** (sur 10) — s'il tombe à 0, les props gagnent. Les props
+gagnent aussi si le temps s'écoule avec au moins un survivant ; le chercheur
+gagne s'il élimine tout le monde.
+
+La carte est générée avec une graine fixe : tous les joueurs voient exactement
+les mêmes objets aux mêmes endroits. L'hôte est autoritaire pour les rôles,
+les dégâts et la fin de manche. En fin de manche, retour au lobby et l'hôte
+peut relancer sans recharger la scène.
+
+## Le Flappy Bird 3D (`scenes/main_3d.tscn`)
+
+Le jeu d'origine du projet, vu de côté en 3D : **Espace** ou clic pour voler,
+**Échap** pour revenir au menu. (La version 2D historique a été supprimée.)
 
 ## Lancer le projet
 
-Ouvrir le dossier dans Godot 4.6, puis **F5** (scène principale) ou **F6** sur
+Ouvrir le dossier dans Godot 4.6, puis **F5** (menu principal) ou **F6** sur
 une scène précise.
 
 ## Tests
@@ -92,6 +131,8 @@ Des tests headless simulent des parties pour valider la logique sans ouvrir
 l'éditeur :
 
 ```sh
-godot --headless res://tests/test_arena.tscn   # cycle de vagues + amélioration
-godot --headless res://tests/test_boss.tscn     # combat de boss
+godot --headless res://tests/test_arena.tscn      # cycle de vagues + amélioration
+godot --headless res://tests/test_boss.tscn       # combat de boss
+godot --headless res://tests/test_regen.tscn      # régénération de vie
+godot --headless res://tests/test_prop_hunt.tscn  # manche complète de prop hunt
 ```

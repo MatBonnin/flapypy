@@ -87,6 +87,8 @@ func _ready() -> void:
 
 func _physics_process(delta: float) -> void:
 	if pvp_enabled and not _is_local_pvp_player():
+		# le serveur s'appuie sur invuln_timer pour les degats des joueurs
+		# distants : il doit continuer a s'ecouler ici aussi
 		invuln_timer = maxf(invuln_timer - delta, 0.0)
 		global_position = global_position.lerp(pvp_target_position, minf(1.0, 18.0 * delta))
 		rotation.y = lerp_angle(rotation.y, pvp_target_rotation, minf(1.0, 18.0 * delta))
