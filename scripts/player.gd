@@ -87,6 +87,7 @@ func _ready() -> void:
 
 func _physics_process(delta: float) -> void:
 	if pvp_enabled and not _is_local_pvp_player():
+		invuln_timer = maxf(invuln_timer - delta, 0.0)
 		global_position = global_position.lerp(pvp_target_position, minf(1.0, 18.0 * delta))
 		rotation.y = lerp_angle(rotation.y, pvp_target_rotation, minf(1.0, 18.0 * delta))
 		_apply_anim()
@@ -283,7 +284,7 @@ func throw_beak() -> void:
 	if dead or beak_timer > 0.0:
 		return
 	if pvp_enabled:
-		beak_timer = BEAK_COOLDOWN * beak_cd_mult
+		beak_timer = (0.35 if triple_timer > 0.0 else BEAK_COOLDOWN) * beak_cd_mult
 		beak.visible = false
 		if sfx:
 			sfx.play_flap()
@@ -377,6 +378,33 @@ func set_pvp_health(new_hp: int, is_dead: bool) -> void:
 		dt.tween_property(model, "rotation:x", -1.5, 0.25)
 	elif not dead:
 		model.rotation.x = 0.0
+
+func pvp_respawn(pos: Vector3, hp_value: int) -> void:
+	global_position = pos
+	pvp_target_position = pos
+	velocity = Vector3.ZERO
+	vy = 0.0
+	jumps_left = max_jumps
+	hp = hp_value
+	dead = false
+	invuln_timer = 1.2
+	no_damage_time = 0.0
+	regen_timer = 0.0
+	attack_timer = 0.0
+	beak_timer = 0.0
+	baguette_timer = 0.0
+	triple_timer = 0.0
+	coffee_timer = 0.0
+	giant_timer = 0.0
+	base_scale = 1.0
+	attacking = false
+	model.rotation.x = 0.0
+	model.scale = Vector3.ONE
+	beak.visible = true
+	beak.material_override = null
+	_gold_mat = null
+	_unflash()
+	hp_changed.emit(hp)
 
 func set_pvp_color(color: Color) -> void:
 	for m in _meshes:

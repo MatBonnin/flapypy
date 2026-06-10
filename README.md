@@ -46,12 +46,31 @@ Mode multijoueur local 1 a 4 joueurs sur le meme reseau :
   manche ;
 - le MVP synchronise les positions, les PV, les morts, les coups de massue, les
   lancers de bec et le classement.
+- le PvP est maintenant en deathmatch : un joueur KO revient apres quelques
+  secondes, et le vainqueur est celui qui a le plus d'eliminations au timer.
+- des bonus apparaissent dans l'arene : coeur, baguette, bec d'or, cafe et
+  champignon.
+- l'hote peut relancer une manche avec **Entree** a l'ecran de victoire.
 - les touches sont configurables depuis **Parametres des touches** dans le menu
   PvP, ou avec **Echap** pendant la partie.
 
 Limitations actuelles du MVP : pas encore de lobby avance, pas de relance sans
-recharger la scene, et les projectiles PvP restent volontairement simples
-(pas encore de triple tir reseau).
+vote cote clients, et la connexion reste limitee au LAN direct par IP.
+
+### Depannage LAN
+
+Le PvP utilise ENet en UDP sur le port **42424**.
+
+- L'hote doit donner une IPv4 locale affichee dans le menu PvP, par exemple
+  `192.168.1.23` ou `10.0.0.12`. Ne pas donner `127.0.0.1` : cette adresse
+  pointe toujours vers le PC du joueur lui-meme.
+- Les deux PC doivent etre sur le meme reseau local. Si Windows marque le Wi-Fi
+  en reseau public, passer le reseau en prive peut etre necessaire.
+- Au premier lancement, Windows Defender peut bloquer l'EXE. Sur le PC hote,
+  autoriser `Flapypy_PvP.exe` sur les reseaux prives, ou ajouter une regle
+  entrante UDP pour le port `42424`.
+- Pour exporter directement le PvP, verifier que la scene principale du projet
+  est `res://scenes/pvp_arena.tscn` avant de refaire l'EXE.
 
 ## Les jeux d'origine
 

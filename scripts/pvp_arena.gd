@@ -4,12 +4,16 @@ extends Node3D
 
 const BirdmanScene := preload("res://scenes/birdman.tscn")
 const PvpBeakScene := preload("res://scenes/pvp_beak_projectile.tscn")
+const PvpPickupScene := preload("res://scenes/pvp_pickup.tscn")
 const SETTINGS_PATH := "user://settings.cfg"
 const PORT := 42424
 const MAX_PLAYERS := 4
 const MATCH_SECONDS := 120.0
 const STATE_SEND_INTERVAL := 0.05
 const PVP_BEAK_COOLDOWN := 0.7
+const RESPAWN_SECONDS := 3.0
+const PICKUP_SPAWN_INTERVAL := 7.0
+const MAX_PICKUPS := 5
 const MAP_HALF := 10.0
 const CAMERA_OFFSET := Vector3(0, 9, 6.5)
 const ACTION_MOVE_UP := "arena_move_up"
@@ -76,19 +80,37 @@ const ROCK_POSITIONS: Array[Vector3] = [
 	Vector3(-1.0, 0, -4.8),
 ]
 const HOUSE_POSITION := Vector3(-4.0, 0, -4.5)
+const PICKUP_POSITIONS: Array[Vector3] = [
+	Vector3(0.0, 0.45, 0.0),
+	Vector3(2.7, 0.45, 2.5),
+	Vector3(-2.7, 0.45, -1.2),
+	Vector3(6.0, 0.45, -1.8),
+	Vector3(-6.3, 0.45, 2.2),
+	Vector3(1.2, 0.45, -5.8),
+	Vector3(-1.8, 0.45, 6.2),
+	Vector3(7.5, 0.45, 6.8),
+	Vector3(-7.4, 0.45, -7.2),
+	Vector3(4.2, 0.45, 5.8),
+]
 
 var peer: ENetMultiplayerPeer = null
 var players: Dictionary = {}
 var player_names: Dictionary = {}
 var player_order: Array[int] = []
 var kills: Dictionary = {}
+var deaths: Dictionary = {}
+var streaks: Dictionary = {}
+var respawn_due_at: Dictionary = {}
 var projectiles: Dictionary = {}
+var pickups: Dictionary = {}
 var beak_ready_at: Dictionary = {}
 var next_projectile_id := 1
+var next_pickup_id := 1
 var match_running := false
 var match_over := false
 var match_time_left := MATCH_SECONDS
 var state_send_timer := 0.0
+var pickup_spawn_timer := 2.0
 
 var ui_layer: CanvasLayer
 var menu_panel: PanelContainer
@@ -133,15 +155,21 @@ func _input(event: InputEvent) -> void:
 	if event.is_action_pressed(ACTION_PAUSE):
 		_show_controls_panel(false)
 		get_viewport().set_input_as_handled()
+	elif match_over and event.is_action_pressed("ui_accept"):
+		if multiplayer.is_server():
+			_restart_match()
+		else:
+			message_label.text = "En attente de l'hote pour relancer."
+		get_viewport().set_input_as_handled()
 
 func _process(delta: float) -> void:
 	if match_running and multiplayer.is_server():
 		match_time_left = maxf(match_time_left - delta, 0.0)
+		_update_server_respawns()
+		_update_server_pickups(delta)
 		_broadcast_match_state()
 		if match_time_left <= 0.0:
 			_end_match()
-		else:
-			_check_last_player()
 	_update_camera(delta)
 	_update_hud()
 
@@ -253,7 +281,7 @@ func _build_ui() -> void:
 
 	ip_edit = LineEdit.new()
 	ip_edit.placeholder_text = "IP de l'hote"
-	ip_edit.text = "127.0.0.1"
+	ip_edit.text = ""
 	root.add_child(ip_edit)
 
 	var row := HBoxContainer.new()
@@ -281,7 +309,7 @@ func _build_ui() -> void:
 	root.add_child(settings_button)
 
 	status_label = Label.new()
-	status_label.text = "Meme reseau : l'hote clique Heberger, les autres entrent son IP locale."
+	status_label.text = "Meme reseau : l'hote clique Heberger, les autres entrent son IP locale.\n%s" % _local_network_hint()
 	status_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	status_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	root.add_child(status_label)
@@ -460,6 +488,31 @@ func _key_name(keycode: int) -> String:
 		return str(keycode)
 	return text
 
+func _local_network_hint() -> String:
+	var addresses := _get_lan_addresses()
+	if addresses.is_empty():
+		return "Aucune IPv4 LAN detectee. Verifie le Wi-Fi/Ethernet et evite 127.0.0.1."
+	return "IP a donner : %s | Port UDP : %d" % [", ".join(addresses), PORT]
+
+func _get_lan_addresses() -> PackedStringArray:
+	var addresses := PackedStringArray()
+	for address in IP.get_local_addresses():
+		var text := str(address)
+		if _is_private_ipv4(text) and not addresses.has(text):
+			addresses.append(text)
+	return addresses
+
+func _is_private_ipv4(address: String) -> bool:
+	var parts := address.split(".")
+	if parts.size() != 4:
+		return false
+	if address.begins_with("10.") or address.begins_with("192.168."):
+		return true
+	if address.begins_with("172."):
+		var second := int(parts[1])
+		return second >= 16 and second <= 31
+	return false
+
 func _host_game() -> void:
 	peer = ENetMultiplayerPeer.new()
 	var err := peer.create_server(PORT, MAX_PLAYERS - 1)
@@ -472,24 +525,31 @@ func _host_game() -> void:
 	player_names[host_id] = _clean_name(name_edit.text, "Hote")
 	player_order.append(host_id)
 	kills[host_id] = 0
+	deaths[host_id] = 0
+	streaks[host_id] = 0
+	beak_ready_at[host_id] = 0.0
 	_client_spawn_player(host_id, player_names[host_id], SPAWN_POINTS[0], 8, false)
-	match_running = true
-	match_over = false
-	match_time_left = MATCH_SECONDS
 	menu_panel.visible = false
-	message_label.text = "Match PvP lance"
-	_broadcast_match_state()
+	_start_match()
+	message_label.text = "Partie hebergee. Donne a ton pote : %s" % _local_network_hint()
 
 func _join_game() -> void:
+	var host_ip := ip_edit.text.strip_edges()
+	if host_ip == "":
+		status_label.text = "Entre l'IPv4 LAN de l'hote. Exemple : 192.168.1.23."
+		return
+	if host_ip == "127.0.0.1" or host_ip.to_lower() == "localhost":
+		status_label.text = "127.0.0.1 ne marche que sur le meme PC. Entre l'IPv4 LAN de l'hote."
+		return
 	peer = ENetMultiplayerPeer.new()
-	var err := peer.create_client(ip_edit.text.strip_edges(), PORT)
+	var err := peer.create_client(host_ip, PORT)
 	if err != OK:
-		status_label.text = "Connexion impossible."
+		status_label.text = "Connexion impossible vers %s:%d." % [host_ip, PORT]
 		return
 	multiplayer.multiplayer_peer = peer
 	host_button.disabled = true
 	join_button.disabled = true
-	status_label.text = "Connexion a %s..." % ip_edit.text.strip_edges()
+	status_label.text = "Connexion a %s:%d..." % [host_ip, PORT]
 
 func _reset_match_data() -> void:
 	for player in players.values():
@@ -499,12 +559,47 @@ func _reset_match_data() -> void:
 	player_names.clear()
 	player_order.clear()
 	kills.clear()
+	deaths.clear()
+	streaks.clear()
+	respawn_due_at.clear()
 	projectiles.clear()
+	pickups.clear()
 	beak_ready_at.clear()
 	next_projectile_id = 1
+	next_pickup_id = 1
 	match_time_left = MATCH_SECONDS
+	pickup_spawn_timer = 2.0
 	match_running = false
 	match_over = false
+
+func _start_match() -> void:
+	match_running = true
+	match_over = false
+	match_time_left = MATCH_SECONDS
+	pickup_spawn_timer = 1.0
+	respawn_due_at.clear()
+	for id in player_order:
+		kills[id] = 0
+		deaths[id] = 0
+		streaks[id] = 0
+		beak_ready_at[id] = 0.0
+		var spawn_pos := SPAWN_POINTS[player_order.find(id) % SPAWN_POINTS.size()]
+		rpc("_client_respawn_player", id, spawn_pos, 8)
+	for pickup_id in pickups.keys():
+		rpc("_client_despawn_pvp_pickup", int(pickup_id))
+	pickups.clear()
+	message_label.text = "Deathmatch lance !"
+	rpc("_client_match_state", match_running, match_time_left, match_over)
+	rpc("_client_match_message", message_label.text)
+	_broadcast_scoreboard()
+
+func _restart_match() -> void:
+	if not multiplayer.is_server():
+		return
+	for projectile_id in projectiles.keys():
+		rpc("_client_despawn_pvp_beak", int(projectile_id))
+	projectiles.clear()
+	_start_match()
 
 func _on_connected_to_server() -> void:
 	menu_panel.visible = false
@@ -514,12 +609,18 @@ func _on_connected_to_server() -> void:
 func _on_connection_failed() -> void:
 	host_button.disabled = false
 	join_button.disabled = false
-	status_label.text = "Connexion echouee."
+	status_label.text = "Connexion echouee. Verifie l'IP, le meme reseau, et le pare-feu Windows de l'hote sur UDP %d." % PORT
+	if multiplayer.multiplayer_peer != null:
+		multiplayer.multiplayer_peer.close()
+		multiplayer.multiplayer_peer = null
 
 func _on_server_disconnected() -> void:
 	message_label.text = "Hote deconnecte."
 	match_running = false
 	match_over = true
+	if multiplayer.multiplayer_peer != null:
+		multiplayer.multiplayer_peer.close()
+		multiplayer.multiplayer_peer = null
 
 func _on_peer_connected(_id: int) -> void:
 	pass
@@ -541,6 +642,8 @@ func _server_register_player(display_name: String) -> void:
 	player_names[id] = _clean_name(display_name, "Joueur %d" % id)
 	player_order.append(id)
 	kills[id] = 0
+	deaths[id] = 0
+	streaks[id] = 0
 	beak_ready_at[id] = 0.0
 	var spawn_pos := SPAWN_POINTS[(player_order.size() - 1) % SPAWN_POINTS.size()]
 	for existing_id in player_order:
@@ -554,6 +657,10 @@ func _server_register_player(display_name: String) -> void:
 			existing_pos = existing_player.global_position
 		rpc_id(id, "_client_spawn_player", existing_id, player_names[existing_id], existing_pos, existing_hp, existing_dead)
 	rpc("_client_spawn_player", id, player_names[id], spawn_pos, 8, false)
+	for pickup_id in pickups.keys():
+		var pickup: Area3D = pickups[pickup_id]
+		if is_instance_valid(pickup):
+			rpc_id(id, "_client_spawn_pvp_pickup", int(pickup_id), pickup.type, pickup.global_position)
 	rpc_id(id, "_client_match_state", match_running, match_time_left, match_over)
 	_broadcast_scoreboard()
 
@@ -574,6 +681,10 @@ func _client_spawn_player(peer_id: int, display_name: String, spawn_pos: Vector3
 		player_order.append(peer_id)
 	if not kills.has(peer_id):
 		kills[peer_id] = 0
+	if not deaths.has(peer_id):
+		deaths[peer_id] = 0
+	if not streaks.has(peer_id):
+		streaks[peer_id] = 0
 	if players.has(peer_id):
 		var existing: CharacterBody3D = players[peer_id]
 		existing.set_pvp_remote_state(spawn_pos, existing.rotation.y, hp_value, is_dead)
@@ -606,6 +717,9 @@ func _client_remove_player(peer_id: int) -> void:
 		players.erase(peer_id)
 	player_names.erase(peer_id)
 	kills.erase(peer_id)
+	deaths.erase(peer_id)
+	streaks.erase(peer_id)
+	respawn_due_at.erase(peer_id)
 	beak_ready_at.erase(peer_id)
 	player_order.erase(peer_id)
 
@@ -617,8 +731,45 @@ func _server_remove_player(peer_id: int) -> void:
 		players.erase(peer_id)
 	player_names.erase(peer_id)
 	kills.erase(peer_id)
+	deaths.erase(peer_id)
+	streaks.erase(peer_id)
+	respawn_due_at.erase(peer_id)
 	beak_ready_at.erase(peer_id)
 	player_order.erase(peer_id)
+
+@rpc("authority", "call_local", "reliable")
+func _client_respawn_player(peer_id: int, spawn_pos: Vector3, hp_value: int) -> void:
+	var player: CharacterBody3D = players.get(peer_id)
+	if player == null:
+		return
+	player.pvp_respawn(spawn_pos, hp_value)
+
+func _update_server_respawns() -> void:
+	var now := float(Time.get_ticks_msec()) / 1000.0
+	for id in respawn_due_at.keys():
+		if now >= float(respawn_due_at[id]):
+			respawn_due_at.erase(id)
+			if players.has(id):
+				var spawn_pos := _best_respawn_position(int(id))
+				rpc("_client_respawn_player", int(id), spawn_pos, 8)
+				rpc("_client_match_message", "%s revient dans l'arene" % player_names.get(id, "Joueur"))
+				_broadcast_scoreboard()
+
+func _best_respawn_position(peer_id: int) -> Vector3:
+	var best_pos := SPAWN_POINTS[0]
+	var best_dist := -1.0
+	for pos in SPAWN_POINTS:
+		var nearest := 999.0
+		for other_id in player_order:
+			if int(other_id) == peer_id:
+				continue
+			var other: CharacterBody3D = players.get(other_id)
+			if other != null and not other.dead:
+				nearest = minf(nearest, (other.global_position - pos).length())
+		if nearest > best_dist:
+			best_dist = nearest
+			best_pos = pos
+	return best_pos
 
 @rpc("any_peer", "unreliable")
 func _server_player_state(pos: Vector3, rot_y: float) -> void:
@@ -628,9 +779,9 @@ func _server_player_state(pos: Vector3, rot_y: float) -> void:
 	var player: CharacterBody3D = players.get(id)
 	if player == null or player.dead:
 		return
-	player.global_position = _clamp_to_arena(pos)
-	player.rotation.y = rot_y
-	rpc("_client_player_state", id, player.global_position, player.rotation.y, player.hp, player.dead)
+	var clamped_pos := _clamp_to_arena(pos)
+	player.set_pvp_remote_state(clamped_pos, rot_y, player.hp, player.dead)
+	rpc("_client_player_state", id, clamped_pos, rot_y, player.hp, player.dead)
 
 @rpc("authority", "unreliable")
 func _client_player_state(peer_id: int, pos: Vector3, rot_y: float, hp_value: int, is_dead: bool) -> void:
@@ -656,29 +807,49 @@ func request_pvp_beak(owner_id: int, _start_pos: Vector3, _direction: Vector3, _
 	if not match_running or match_over:
 		return
 	if multiplayer.is_server():
-		_server_spawn_pvp_beak(owner_id)
+		_server_spawn_pvp_beak(owner_id, _start_pos, _direction, _rot_y)
 	else:
-		rpc_id(1, "_server_request_pvp_beak")
+		rpc_id(1, "_server_request_pvp_beak", _start_pos, _direction, _rot_y)
 
 @rpc("any_peer", "reliable")
-func _server_request_pvp_beak() -> void:
+func _server_request_pvp_beak(start_pos: Vector3, direction: Vector3, rot_y: float) -> void:
 	if not multiplayer.is_server() or not match_running or match_over:
 		return
-	_server_spawn_pvp_beak(multiplayer.get_remote_sender_id())
+	_server_spawn_pvp_beak(multiplayer.get_remote_sender_id(), start_pos, direction, rot_y)
 
-func _server_spawn_pvp_beak(owner_id: int) -> void:
+func _server_spawn_pvp_beak(owner_id: int, start_pos := Vector3.INF, direction := Vector3.ZERO, rot_y := INF) -> void:
 	var player: CharacterBody3D = players.get(owner_id)
 	if player == null or player.dead:
 		return
 	var now := float(Time.get_ticks_msec()) / 1000.0
 	if now < float(beak_ready_at.get(owner_id, 0.0)):
 		return
-	beak_ready_at[owner_id] = now + PVP_BEAK_COOLDOWN
-	var projectile_id := next_projectile_id
-	next_projectile_id += 1
-	var dir := Vector3(sin(player.rotation.y), 0.0, cos(player.rotation.y)).normalized()
-	var spawn_pos := player.global_position + dir * 0.65 + Vector3(0, 0.82, 0)
-	rpc("_client_spawn_pvp_beak", projectile_id, owner_id, spawn_pos, dir, player.rotation.y, player.beak_damage)
+	beak_ready_at[owner_id] = now + ((0.35 if player.triple_timer > 0.0 else PVP_BEAK_COOLDOWN) * player.beak_cd_mult)
+	var base_angle := player.rotation.y
+	if rot_y != INF:
+		base_angle = rot_y
+		player.pvp_target_rotation = rot_y
+	var base_dir := Vector3(sin(base_angle), 0.0, cos(base_angle)).normalized()
+	if direction.length() > 0.01:
+		base_dir = Vector3(direction.x, 0.0, direction.z).normalized()
+		base_angle = atan2(base_dir.x, base_dir.z)
+	var base_spawn := player.global_position + base_dir * 0.65 + Vector3(0, 0.82, 0)
+	if start_pos != Vector3.INF:
+		var clamped_start := _clamp_to_arena(start_pos)
+		clamped_start.y = clampf(start_pos.y, 0.4, 2.6)
+		base_spawn = clamped_start
+	var angles: Array[float] = [0.0]
+	if player.triple_timer > 0.0:
+		angles = [-0.3, 0.0, 0.3]
+	for angle_offset in angles:
+		var projectile_id := next_projectile_id
+		next_projectile_id += 1
+		var angle := base_angle + angle_offset
+		var dir := Vector3(sin(angle), 0.0, cos(angle)).normalized()
+		var spawn_pos := base_spawn
+		if angle_offset != 0.0:
+			spawn_pos += dir * 0.18
+		rpc("_client_spawn_pvp_beak", projectile_id, owner_id, spawn_pos, dir, angle, player.beak_damage)
 
 @rpc("authority", "call_local", "reliable")
 func _client_spawn_pvp_beak(projectile_id: int, owner_id: int, spawn_pos: Vector3, dir: Vector3, rot_y: float, damage: int) -> void:
@@ -702,16 +873,10 @@ func server_pvp_beak_hit(projectile_id: int, owner_id: int, victim_id: int, dama
 	if owner == null or victim == null or owner.dead or victim.dead:
 		server_pvp_beak_expired(projectile_id)
 		return
-	var was_alive: bool = not victim.dead
-	victim.take_damage(damage)
-	rpc("_client_player_health", victim_id, victim.hp, victim.dead)
-	if was_alive and victim.dead:
-		kills[owner_id] = int(kills.get(owner_id, 0)) + 1
-		_broadcast_scoreboard()
+	_apply_pvp_damage(owner_id, victim_id, damage)
 	if sfx:
 		sfx.play_hit()
 	server_pvp_beak_expired(projectile_id)
-	_check_last_player()
 
 func server_pvp_beak_expired(projectile_id: int) -> void:
 	if not multiplayer.is_server():
@@ -724,6 +889,90 @@ func _client_despawn_pvp_beak(projectile_id: int) -> void:
 	if projectile != null and is_instance_valid(projectile):
 		projectile.queue_free()
 	projectiles.erase(projectile_id)
+
+func _update_server_pickups(delta: float) -> void:
+	pickup_spawn_timer -= delta
+	if pickup_spawn_timer > 0.0:
+		return
+	pickup_spawn_timer = PICKUP_SPAWN_INTERVAL
+	if pickups.size() < MAX_PICKUPS:
+		_server_spawn_pvp_pickup()
+
+func _server_spawn_pvp_pickup() -> void:
+	var pickup_id := next_pickup_id
+	next_pickup_id += 1
+	var type := _random_pvp_pickup_type()
+	var pos := PICKUP_POSITIONS[randi() % PICKUP_POSITIONS.size()]
+	rpc("_client_spawn_pvp_pickup", pickup_id, type, pos)
+
+func _random_pvp_pickup_type() -> int:
+	var roll := randf()
+	if roll < 0.26:
+		return 0
+	if roll < 0.46:
+		return 1
+	if roll < 0.66:
+		return 2
+	if roll < 0.84:
+		return 3
+	return 4
+
+@rpc("authority", "call_local", "reliable")
+func _client_spawn_pvp_pickup(pickup_id: int, type: int, pos: Vector3) -> void:
+	if pickups.has(pickup_id):
+		return
+	var pickup: Area3D = PvpPickupScene.instantiate()
+	pickup.name = "PvpPickup_%d" % pickup_id
+	pickup.pickup_id = pickup_id
+	pickup.type = type
+	pickup.pvp_arena = self
+	pickup.global_position = pos
+	units.add_child(pickup)
+	pickups[pickup_id] = pickup
+
+func server_pvp_pickup_collected(pickup_id: int, peer_id: int, type: int) -> void:
+	if not multiplayer.is_server() or not pickups.has(pickup_id):
+		return
+	server_pvp_pickup_expired(pickup_id)
+	rpc("_client_apply_pvp_pickup", peer_id, type)
+	var text := "%s ramasse %s" % [player_names.get(peer_id, "Joueur"), _pickup_name(type)]
+	rpc("_client_match_message", text)
+	_broadcast_scoreboard()
+
+func server_pvp_pickup_expired(pickup_id: int) -> void:
+	if not multiplayer.is_server():
+		return
+	rpc("_client_despawn_pvp_pickup", pickup_id)
+
+@rpc("authority", "call_local", "reliable")
+func _client_despawn_pvp_pickup(pickup_id: int) -> void:
+	var pickup: Node = pickups.get(pickup_id)
+	if pickup != null and is_instance_valid(pickup):
+		pickup.queue_free()
+	pickups.erase(pickup_id)
+
+@rpc("authority", "call_local", "reliable")
+func _client_apply_pvp_pickup(peer_id: int, type: int) -> void:
+	var player: CharacterBody3D = players.get(peer_id)
+	if player == null or player.dead:
+		return
+	player.apply_pickup(type)
+	if multiplayer.is_server():
+		rpc("_client_player_health", peer_id, player.hp, player.dead)
+
+func _pickup_name(type: int) -> String:
+	match type:
+		0:
+			return "un coeur"
+		1:
+			return "la baguette"
+		2:
+			return "le bec d'or"
+		3:
+			return "le cafe"
+		4:
+			return "le champignon"
+	return "un bonus"
 
 @rpc("any_peer", "reliable")
 func _server_request_strike() -> void:
@@ -745,7 +994,9 @@ func _server_apply_strike(attacker_id: int) -> void:
 	var attacker: CharacterBody3D = players.get(attacker_id)
 	if attacker == null or attacker.dead:
 		return
-	var fwd := Vector3(sin(attacker.rotation.y), 0.0, cos(attacker.rotation.y))
+	var attacker_pos := _server_player_position(attacker_id)
+	var attacker_rot := _server_player_rotation(attacker_id)
+	var fwd := Vector3(sin(attacker_rot), 0.0, cos(attacker_rot))
 	var hit_any := false
 	for victim_id in player_order:
 		if victim_id == attacker_id:
@@ -753,22 +1004,63 @@ func _server_apply_strike(attacker_id: int) -> void:
 		var victim: CharacterBody3D = players.get(victim_id)
 		if victim == null or victim.dead:
 			continue
-		if victim.position.y > 0.6:
+		var victim_pos := _server_player_position(int(victim_id))
+		if victim_pos.y > 0.6:
 			continue
-		var to: Vector3 = victim.global_position - attacker.global_position
+		var to: Vector3 = victim_pos - attacker_pos
 		to.y = 0.0
 		var dist := to.length()
 		if dist <= attacker._melee_range() and (dist <= 0.01 or fwd.angle_to(to.normalized()) <= attacker.ATTACK_ARC):
-			var was_alive: bool = not victim.dead
-			victim.take_damage(attacker._melee_damage())
+			_apply_pvp_damage(attacker_id, int(victim_id), attacker._melee_damage())
 			hit_any = true
-			rpc("_client_player_health", victim_id, victim.hp, victim.dead)
-			if was_alive and victim.dead:
-				kills[attacker_id] = int(kills.get(attacker_id, 0)) + 1
-				_broadcast_scoreboard()
 	if hit_any and sfx:
 		sfx.play_hit()
-	_check_last_player()
+
+func _server_player_position(peer_id: int) -> Vector3:
+	var player: CharacterBody3D = players.get(peer_id)
+	if player == null:
+		return Vector3.ZERO
+	if multiplayer.is_server() and peer_id != multiplayer.get_unique_id():
+		return player.pvp_target_position
+	return player.global_position
+
+func _server_player_rotation(peer_id: int) -> float:
+	var player: CharacterBody3D = players.get(peer_id)
+	if player == null:
+		return 0.0
+	if multiplayer.is_server() and peer_id != multiplayer.get_unique_id():
+		return player.pvp_target_rotation
+	return player.rotation.y
+
+func _apply_pvp_damage(attacker_id: int, victim_id: int, damage: int) -> void:
+	var attacker: CharacterBody3D = players.get(attacker_id)
+	var victim: CharacterBody3D = players.get(victim_id)
+	if attacker == null or victim == null or victim.dead:
+		return
+	var was_alive: bool = not victim.dead
+	var victim_pos := _server_player_position(victim_id)
+	var knock := victim_pos - _server_player_position(attacker_id)
+	knock.y = 0.0
+	if knock.length() > 0.01:
+		var knocked_pos := _clamp_to_arena(victim_pos + knock.normalized() * 0.55)
+		victim.global_position = knocked_pos
+		victim.pvp_target_position = knocked_pos
+	victim.take_damage(damage)
+	rpc("_client_player_health", victim_id, victim.hp, victim.dead)
+	if was_alive and victim.dead:
+		kills[attacker_id] = int(kills.get(attacker_id, 0)) + 1
+		streaks[attacker_id] = int(streaks.get(attacker_id, 0)) + 1
+		deaths[victim_id] = int(deaths.get(victim_id, 0)) + 1
+		streaks[victim_id] = 0
+		respawn_due_at[victim_id] = float(Time.get_ticks_msec()) / 1000.0 + RESPAWN_SECONDS
+		var text := "%s elimine %s" % [
+			player_names.get(attacker_id, "Joueur"),
+			player_names.get(victim_id, "Joueur"),
+		]
+		if int(streaks.get(attacker_id, 0)) >= 3:
+			text += "  Serie x%d !" % int(streaks[attacker_id])
+		rpc("_client_match_message", text)
+		_broadcast_scoreboard()
 
 @rpc("authority", "call_local", "reliable")
 func _client_player_health(peer_id: int, hp_value: int, is_dead: bool) -> void:
@@ -794,7 +1086,19 @@ func _broadcast_scoreboard() -> void:
 		if player != null:
 			hp_value = player.hp
 			is_dead = player.dead
-		data.append([id, player_names.get(id, "Joueur"), int(kills.get(id, 0)), hp_value, is_dead])
+		var respawn_left := 0.0
+		if respawn_due_at.has(id):
+			respawn_left = maxf(0.0, float(respawn_due_at[id]) - float(Time.get_ticks_msec()) / 1000.0)
+		data.append([
+			id,
+			player_names.get(id, "Joueur"),
+			int(kills.get(id, 0)),
+			int(deaths.get(id, 0)),
+			int(streaks.get(id, 0)),
+			hp_value,
+			is_dead,
+			respawn_left,
+		])
 	rpc("_client_scoreboard", data)
 
 @rpc("authority", "call_local", "reliable")
@@ -803,20 +1107,19 @@ func _client_scoreboard(data: Array) -> void:
 		var id := int(row[0])
 		player_names[id] = str(row[1])
 		kills[id] = int(row[2])
+		deaths[id] = int(row[3])
+		streaks[id] = int(row[4])
+		var respawn_left := float(row[7])
+		if respawn_left > 0.0:
+			respawn_due_at[id] = float(Time.get_ticks_msec()) / 1000.0 + respawn_left
+		else:
+			respawn_due_at.erase(id)
 		var player: CharacterBody3D = players.get(id)
 		if player != null:
-			player.set_pvp_health(int(row[3]), bool(row[4]))
+			player.set_pvp_health(int(row[5]), bool(row[6]))
 
 func _check_last_player() -> void:
-	if not match_running or match_over or player_order.size() <= 1:
-		return
-	var alive_ids: Array[int] = []
-	for id in player_order:
-		var player: CharacterBody3D = players.get(id)
-		if player != null and not player.dead:
-			alive_ids.append(id)
-	if alive_ids.size() <= 1:
-		_end_match()
+	pass
 
 func _end_match() -> void:
 	if match_over:
@@ -825,27 +1128,40 @@ func _end_match() -> void:
 	match_over = true
 	var winner_id := _winner_id()
 	var winner_name: String = str(player_names.get(winner_id, "Personne"))
-	var text := "Victoire : %s" % winner_name
+	var text := "Victoire : %s  (%d K / %d D)" % [
+		winner_name,
+		int(kills.get(winner_id, 0)),
+		int(deaths.get(winner_id, 0)),
+	]
 	rpc("_client_match_over", text, winner_id)
 
 @rpc("authority", "call_local", "reliable")
 func _client_match_over(text: String, _winner_id: int) -> void:
 	match_running = false
 	match_over = true
-	message_label.text = "%s\nRelance la scene pour rejouer." % text
+	message_label.text = "%s\nHote : Entree pour relancer" % text
+
+@rpc("authority", "call_local", "reliable")
+func _client_match_message(text: String) -> void:
+	if match_over:
+		return
+	message_label.text = text
+	get_tree().create_timer(2.0, false).timeout.connect(func() -> void:
+		if not match_over and message_label.text == text:
+			message_label.text = ""
+	)
 
 func _winner_id() -> int:
 	var best_id := -1
-	var best_alive := -1
 	var best_kills := -1
+	var best_deaths := 999
 	for id in player_order:
-		var player: CharacterBody3D = players.get(id)
-		var alive_score := 1 if player != null and not player.dead else 0
 		var kill_score := int(kills.get(id, 0))
-		if alive_score > best_alive or (alive_score == best_alive and kill_score > best_kills):
+		var death_score := int(deaths.get(id, 0))
+		if kill_score > best_kills or (kill_score == best_kills and death_score < best_deaths):
 			best_id = id
-			best_alive = alive_score
 			best_kills = kill_score
+			best_deaths = death_score
 	return best_id
 
 func _update_camera(delta: float) -> void:
@@ -865,13 +1181,21 @@ func _update_hud() -> void:
 		var dead_text := "KO"
 		if player != null:
 			hp_value = maxi(player.hp, 0)
-			dead_text = "KO" if player.dead else "%d PV" % hp_value
+			if player.dead:
+				dead_text = "KO"
+				if multiplayer.is_server() and respawn_due_at.has(id):
+					var left := maxi(0, int(ceil(float(respawn_due_at[id]) - float(Time.get_ticks_msec()) / 1000.0)))
+					dead_text = "Retour %ds" % left
+			else:
+				dead_text = "%d PV" % hp_value
 		var marker := " *" if id == multiplayer.get_unique_id() and multiplayer.multiplayer_peer != null else ""
-		lines.append("%s%s  %s  K:%d" % [
+		lines.append("%s%s  %s  K:%d D:%d S:%d" % [
 			player_names.get(id, "Joueur"),
 			marker,
 			dead_text,
 			int(kills.get(id, 0)),
+			int(deaths.get(id, 0)),
+			int(streaks.get(id, 0)),
 		])
 	board_label.text = "\n".join(lines)
 
