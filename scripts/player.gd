@@ -17,7 +17,7 @@ const ATTACK_RANGE := 1.6
 const ATTACK_ARC := 1.1
 const ATTACK_COOLDOWN := 0.45
 const BEAK_COOLDOWN := 0.7
-const HURT_INVULN := 0.8
+const HURT_INVULN := 1.0
 const MAX_HP := 8
 const ACTION_MOVE_UP := "arena_move_up"
 const ACTION_MOVE_DOWN := "arena_move_down"
@@ -26,6 +26,8 @@ const ACTION_MOVE_RIGHT := "arena_move_right"
 const ACTION_ATTACK := "arena_attack"
 const ACTION_THROW_BEAK := "arena_throw_beak"
 const ACTION_JUMP := "arena_jump"
+const REGEN_DELAY := 4.0   # secondes sans dégât avant que la vie remonte
+const REGEN_INTERVAL := 1.5 # secondes entre chaque PV régénéré
 
 var hp := MAX_HP
 var max_hp := MAX_HP
@@ -39,6 +41,8 @@ var vy := 0.0
 var attack_timer := 0.0
 var beak_timer := 0.0
 var invuln_timer := 0.0
+var no_damage_time := 0.0
+var regen_timer := 0.0
 var baguette_timer := 0.0
 var triple_timer := 0.0
 var coffee_timer := 0.0
@@ -76,6 +80,7 @@ func _physics_process(delta: float) -> void:
 		return
 	attack_timer = maxf(attack_timer - delta, 0.0)
 	invuln_timer = maxf(invuln_timer - delta, 0.0)
+	_update_regen(delta)
 	_update_buffs(delta)
 	if beak_timer > 0.0:
 		beak_timer -= delta
@@ -148,6 +153,18 @@ func jump() -> void:
 	vy = JUMP_SPEED
 	if sfx:
 		sfx.play_flap()
+
+func _update_regen(delta: float) -> void:
+	# La vie remonte seulement après un moment sans prendre de coup :
+	# récompense l'esquive sans aider quand on se fait déborder.
+	no_damage_time += delta
+	if hp >= max_hp or no_damage_time < REGEN_DELAY:
+		return
+	regen_timer += delta
+	if regen_timer >= REGEN_INTERVAL:
+		regen_timer = 0.0
+		hp = mini(hp + 1, max_hp)
+		hp_changed.emit(hp)
 
 func _update_buffs(delta: float) -> void:
 	if baguette_timer > 0.0:
@@ -283,6 +300,8 @@ func take_damage(amount: int) -> void:
 	if dead or invuln_timer > 0.0:
 		return
 	invuln_timer = HURT_INVULN
+	no_damage_time = 0.0
+	regen_timer = 0.0
 	hp -= amount
 	if sfx:
 		sfx.play_hit()
