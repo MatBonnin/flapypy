@@ -46,6 +46,8 @@ Mode multijoueur local 1 a 4 joueurs sur le meme reseau :
   manche ;
 - le MVP synchronise les positions, les PV, les morts, les coups de massue, les
   lancers de bec et le classement.
+- les touches sont configurables depuis **Parametres des touches** dans le menu
+  PvP, ou avec **Echap** pendant la partie.
 
 Limitations actuelles du MVP : pas encore de lobby avance, pas de relance sans
 recharger la scene, et les projectiles PvP restent volontairement simples

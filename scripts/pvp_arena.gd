@@ -4,6 +4,7 @@ extends Node3D
 
 const BirdmanScene := preload("res://scenes/birdman.tscn")
 const PvpBeakScene := preload("res://scenes/pvp_beak_projectile.tscn")
+const SETTINGS_PATH := "user://settings.cfg"
 const PORT := 42424
 const MAX_PLAYERS := 4
 const MATCH_SECONDS := 120.0
@@ -20,14 +21,14 @@ const ACTION_THROW_BEAK := "arena_throw_beak"
 const ACTION_JUMP := "arena_jump"
 const ACTION_PAUSE := "arena_pause"
 const CONTROL_BINDINGS := [
-	{"action": ACTION_MOVE_UP, "key": KEY_Z},
-	{"action": ACTION_MOVE_DOWN, "key": KEY_S},
-	{"action": ACTION_MOVE_LEFT, "key": KEY_Q},
-	{"action": ACTION_MOVE_RIGHT, "key": KEY_D},
-	{"action": ACTION_ATTACK, "key": KEY_E},
-	{"action": ACTION_THROW_BEAK, "key": KEY_F},
-	{"action": ACTION_JUMP, "key": KEY_SPACE},
-	{"action": ACTION_PAUSE, "key": KEY_ESCAPE},
+	{"action": ACTION_MOVE_UP, "label": "Avancer", "default": KEY_Z},
+	{"action": ACTION_MOVE_DOWN, "label": "Reculer", "default": KEY_S},
+	{"action": ACTION_MOVE_LEFT, "label": "Gauche", "default": KEY_Q},
+	{"action": ACTION_MOVE_RIGHT, "label": "Droite", "default": KEY_D},
+	{"action": ACTION_ATTACK, "label": "Massue", "default": KEY_E},
+	{"action": ACTION_THROW_BEAK, "label": "Lancer le bec", "default": KEY_F},
+	{"action": ACTION_JUMP, "label": "Sauter", "default": KEY_SPACE},
+	{"action": ACTION_PAUSE, "label": "Parametres", "default": KEY_ESCAPE},
 ]
 const EXTRA_BINDINGS := {
 	ACTION_MOVE_UP: [KEY_UP],
@@ -99,6 +100,12 @@ var board_label: Label
 var message_label: Label
 var host_button: Button
 var join_button: Button
+var controls_panel: Control
+var controls_status: Label
+var control_buttons: Dictionary = {}
+var control_keys: Dictionary = {}
+var pending_rebind_action := ""
+var controls_return_to_menu := false
 
 @onready var units: Node3D = $Units
 @onready var floor_root: Node3D = $Floor
@@ -107,11 +114,25 @@ var join_button: Button
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
-	_setup_default_controls()
+	_load_controls()
 	_build_map()
 	_build_ui()
 	_connect_multiplayer_signals()
 	camera.position = CAMERA_OFFSET
+
+func _input(event: InputEvent) -> void:
+	if _handle_rebind_input(event):
+		return
+	if controls_panel != null and controls_panel.visible:
+		if event.is_action_pressed(ACTION_PAUSE):
+			_hide_controls_panel()
+			get_viewport().set_input_as_handled()
+		elif event is InputEventKey:
+			get_viewport().set_input_as_handled()
+		return
+	if event.is_action_pressed(ACTION_PAUSE):
+		_show_controls_panel(false)
+		get_viewport().set_input_as_handled()
 
 func _process(delta: float) -> void:
 	if match_running and multiplayer.is_server():
@@ -147,16 +168,35 @@ func _connect_multiplayer_signals() -> void:
 	multiplayer.connection_failed.connect(_on_connection_failed)
 	multiplayer.server_disconnected.connect(_on_server_disconnected)
 
-func _setup_default_controls() -> void:
+func _load_controls() -> void:
+	var cfg := ConfigFile.new()
+	var loaded: bool = cfg.load(SETTINGS_PATH) == OK
 	for binding in CONTROL_BINDINGS:
 		var action: String = binding["action"]
-		if not InputMap.has_action(action):
-			InputMap.add_action(action)
-		if InputMap.action_get_events(action).is_empty():
-			var event := InputEventKey.new()
-			event.physical_keycode = int(binding["key"])
-			InputMap.action_add_event(action, event)
-		for extra_key in EXTRA_BINDINGS.get(action, []):
+		var keycode: int = int(binding["default"])
+		if loaded:
+			keycode = int(cfg.get_value("controls", action, keycode))
+		control_keys[action] = keycode
+		_apply_action_key(action, keycode)
+
+func _save_controls() -> void:
+	var cfg := ConfigFile.new()
+	for binding in CONTROL_BINDINGS:
+		var action: String = binding["action"]
+		cfg.set_value("controls", action, int(control_keys[action]))
+	cfg.save(SETTINGS_PATH)
+
+func _apply_action_key(action: String, keycode: int) -> void:
+	if keycode == KEY_NONE:
+		return
+	if not InputMap.has_action(action):
+		InputMap.add_action(action)
+	InputMap.action_erase_events(action)
+	var event := InputEventKey.new()
+	event.physical_keycode = keycode
+	InputMap.action_add_event(action, event)
+	for extra_key in EXTRA_BINDINGS.get(action, []):
+		if int(extra_key) != keycode:
 			var extra_event := InputEventKey.new()
 			extra_event.physical_keycode = int(extra_key)
 			InputMap.action_add_event(action, extra_event)
@@ -234,11 +274,19 @@ func _build_ui() -> void:
 	join_button.pressed.connect(_join_game)
 	row.add_child(join_button)
 
+	var settings_button := Button.new()
+	settings_button.text = "Parametres des touches"
+	settings_button.custom_minimum_size = Vector2(0, 38)
+	settings_button.pressed.connect(_show_controls_panel.bind(true))
+	root.add_child(settings_button)
+
 	status_label = Label.new()
 	status_label.text = "Meme reseau : l'hote clique Heberger, les autres entrent son IP locale."
 	status_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	status_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	root.add_child(status_label)
+
+	_build_controls_panel()
 
 func _make_label(pos: Vector2, size: Vector2, font_size: int, align: HorizontalAlignment) -> Label:
 	var label := Label.new()
@@ -250,6 +298,167 @@ func _make_label(pos: Vector2, size: Vector2, font_size: int, align: HorizontalA
 	label.add_theme_color_override("font_outline_color", Color(0, 0, 0))
 	label.add_theme_constant_override("outline_size", 8)
 	return label
+
+func _build_controls_panel() -> void:
+	controls_panel = Control.new()
+	controls_panel.name = "ControlsPanel"
+	controls_panel.visible = false
+	controls_panel.set_anchors_preset(Control.PRESET_FULL_RECT)
+	ui_layer.add_child(controls_panel)
+
+	var dim := ColorRect.new()
+	dim.color = Color(0, 0, 0, 0.62)
+	dim.set_anchors_preset(Control.PRESET_FULL_RECT)
+	controls_panel.add_child(dim)
+
+	var center := CenterContainer.new()
+	center.set_anchors_preset(Control.PRESET_FULL_RECT)
+	controls_panel.add_child(center)
+
+	var panel := PanelContainer.new()
+	panel.custom_minimum_size = Vector2(520, 0)
+	center.add_child(panel)
+
+	var margin := MarginContainer.new()
+	margin.add_theme_constant_override("margin_left", 28)
+	margin.add_theme_constant_override("margin_top", 24)
+	margin.add_theme_constant_override("margin_right", 28)
+	margin.add_theme_constant_override("margin_bottom", 24)
+	panel.add_child(margin)
+
+	var root := VBoxContainer.new()
+	root.add_theme_constant_override("separation", 9)
+	margin.add_child(root)
+
+	var title := Label.new()
+	title.text = "Parametres"
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title.add_theme_font_size_override("font_size", 34)
+	root.add_child(title)
+
+	controls_status = Label.new()
+	controls_status.text = "Clique une action, puis appuie sur une touche."
+	controls_status.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	controls_status.add_theme_font_size_override("font_size", 16)
+	root.add_child(controls_status)
+
+	for binding in CONTROL_BINDINGS:
+		var row := HBoxContainer.new()
+		row.add_theme_constant_override("separation", 12)
+		root.add_child(row)
+
+		var label := Label.new()
+		label.text = binding["label"]
+		label.custom_minimum_size = Vector2(220, 32)
+		label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		row.add_child(label)
+
+		var button := Button.new()
+		var action: String = binding["action"]
+		button.text = _key_name(int(control_keys[action]))
+		button.custom_minimum_size = Vector2(180, 32)
+		button.pressed.connect(_begin_rebind.bind(action))
+		row.add_child(button)
+		control_buttons[action] = button
+
+	var reset_button := Button.new()
+	reset_button.text = "Touches par defaut"
+	reset_button.custom_minimum_size = Vector2(260, 38)
+	reset_button.pressed.connect(_reset_controls)
+	root.add_child(reset_button)
+
+	var back_button := Button.new()
+	back_button.text = "Retour"
+	back_button.custom_minimum_size = Vector2(260, 38)
+	back_button.pressed.connect(_hide_controls_panel)
+	root.add_child(back_button)
+
+func _show_controls_panel(return_to_menu: bool) -> void:
+	controls_return_to_menu = return_to_menu
+	pending_rebind_action = ""
+	if return_to_menu:
+		menu_panel.visible = false
+	controls_panel.visible = true
+	controls_status.text = "Clique une action, puis appuie sur une touche."
+	_update_control_buttons()
+
+func _hide_controls_panel() -> void:
+	pending_rebind_action = ""
+	controls_panel.visible = false
+	if controls_return_to_menu and multiplayer.multiplayer_peer == null:
+		menu_panel.visible = true
+	controls_return_to_menu = false
+	_update_control_buttons()
+
+func _begin_rebind(action: String) -> void:
+	pending_rebind_action = action
+	controls_status.text = "Appuie sur la nouvelle touche pour %s." % _action_label(action)
+	_update_control_buttons()
+	if control_buttons.has(action):
+		control_buttons[action].text = "..."
+
+func _handle_rebind_input(event: InputEvent) -> bool:
+	if pending_rebind_action == "":
+		return false
+	if event is InputEventKey and event.pressed and not event.echo:
+		var keycode: int = event.physical_keycode
+		if keycode == KEY_NONE:
+			keycode = event.keycode
+		_apply_rebind(pending_rebind_action, keycode)
+		pending_rebind_action = ""
+		controls_status.text = "Touches enregistrees."
+		get_viewport().set_input_as_handled()
+		return true
+	return false
+
+func _apply_rebind(action: String, keycode: int) -> void:
+	if keycode == KEY_NONE:
+		return
+	var swapped_action := _action_for_key(keycode)
+	var old_key := int(control_keys[action])
+	if swapped_action != "" and swapped_action != action:
+		control_keys[swapped_action] = old_key
+		_apply_action_key(swapped_action, old_key)
+	control_keys[action] = keycode
+	_apply_action_key(action, keycode)
+	_save_controls()
+	_update_control_buttons()
+
+func _reset_controls() -> void:
+	for binding in CONTROL_BINDINGS:
+		var action: String = binding["action"]
+		var keycode := int(binding["default"])
+		control_keys[action] = keycode
+		_apply_action_key(action, keycode)
+	_save_controls()
+	pending_rebind_action = ""
+	controls_status.text = "Touches par defaut restaurees."
+	_update_control_buttons()
+
+func _update_control_buttons() -> void:
+	for binding in CONTROL_BINDINGS:
+		var action: String = binding["action"]
+		if control_buttons.has(action):
+			control_buttons[action].text = _key_name(int(control_keys[action]))
+
+func _action_label(action: String) -> String:
+	for binding in CONTROL_BINDINGS:
+		if binding["action"] == action:
+			return binding["label"]
+	return action
+
+func _action_for_key(keycode: int) -> String:
+	for binding in CONTROL_BINDINGS:
+		var action: String = binding["action"]
+		if int(control_keys.get(action, KEY_NONE)) == keycode:
+			return action
+	return ""
+
+func _key_name(keycode: int) -> String:
+	var text := OS.get_keycode_string(keycode)
+	if text == "":
+		return str(keycode)
+	return text
 
 func _host_game() -> void:
 	peer = ENetMultiplayerPeer.new()
