@@ -18,6 +18,12 @@ const SEEKER_SPEED_MULT := 1.15
 const MORPH_SPEED_MULT := 0.8
 const MAP_HALF := 10.0
 const CAMERA_OFFSET := Vector3(0, 9, 6.5)
+const PROP_MOVE_MIN_SECONDS := 30.0
+const PROP_MOVE_MAX_SECONDS := 50.0
+const PROP_MOVE_MIN_DISTANCE := 0.25
+const PROP_MOVE_MAX_DISTANCE := 0.7
+const PROP_MOVE_BOUND := 8.8
+const PROP_CLEARANCE_PADDING := 0.18
 const ACTION_MOVE_UP := "arena_move_up"
 const ACTION_MOVE_DOWN := "arena_move_down"
 const ACTION_MOVE_LEFT := "arena_move_left"
@@ -72,12 +78,13 @@ var player_names: Dictionary = {}
 var player_order: Array[int] = []
 var kills: Dictionary = {}
 var morphs: Dictionary = {}
-var props: Array = []  # [{ "type": int, "pos": Vector3 }]
+var props: Array = []  # [{ "id": int, "type": int, "pos": Vector3, "body": Node3D }]
 var seeker_id := 0
 var phase: int = Phase.LOBBY
 var phase_time_left := 0.0
 var round_index := -1
 var state_send_timer := 0.0
+var prop_move_timer := 0.0
 
 var ui_layer: CanvasLayer
 var menu_panel: PanelContainer
@@ -85,6 +92,9 @@ var name_edit: LineEdit
 var ip_edit: LineEdit
 var status_label: Label
 var timer_label: Label
+var local_hp_panel: PanelContainer
+var local_hp_label: Label
+var local_hp_bar: ProgressBar
 var board_label: Label
 var message_label: Label
 var host_button: Button
@@ -136,6 +146,7 @@ func _process(delta: float) -> void:
 					_server_set_phase(Phase.HUNT, HUNT_SECONDS)
 			Phase.HUNT:
 				phase_time_left = maxf(phase_time_left - delta, 0.0)
+				_update_server_prop_moves(delta)
 				rpc("_client_phase_time", phase_time_left)
 				if phase_time_left <= 0.0:
 					_server_end_round("Temps ecoule — victoire des PROPS !")
@@ -209,6 +220,34 @@ func _build_ui() -> void:
 
 	timer_label = _make_label(Vector2(20, 18), Vector2(320, 42), 30, HORIZONTAL_ALIGNMENT_LEFT)
 	ui_layer.add_child(timer_label)
+
+	local_hp_panel = PanelContainer.new()
+	local_hp_panel.position = Vector2(20, 64)
+	local_hp_panel.custom_minimum_size = Vector2(280, 64)
+	local_hp_panel.visible = false
+	ui_layer.add_child(local_hp_panel)
+
+	var hp_margin := MarginContainer.new()
+	hp_margin.add_theme_constant_override("margin_left", 12)
+	hp_margin.add_theme_constant_override("margin_top", 8)
+	hp_margin.add_theme_constant_override("margin_right", 12)
+	hp_margin.add_theme_constant_override("margin_bottom", 8)
+	local_hp_panel.add_child(hp_margin)
+
+	var hp_root := VBoxContainer.new()
+	hp_root.add_theme_constant_override("separation", 6)
+	hp_margin.add_child(hp_root)
+
+	local_hp_label = Label.new()
+	local_hp_label.text = "TES PV"
+	local_hp_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	local_hp_label.add_theme_font_size_override("font_size", 20)
+	hp_root.add_child(local_hp_label)
+
+	local_hp_bar = ProgressBar.new()
+	local_hp_bar.custom_minimum_size = Vector2(240, 16)
+	local_hp_bar.show_percentage = false
+	hp_root.add_child(local_hp_bar)
 
 	board_label = _make_label(Vector2(-360, 18), Vector2(340, 180), 20, HORIZONTAL_ALIGNMENT_RIGHT)
 	board_label.anchor_left = 1.0
@@ -799,6 +838,7 @@ func _server_apply_strike(attacker_id: int) -> void:
 		return
 	var fwd := Vector3(sin(attacker.rotation.y), 0.0, cos(attacker.rotation.y))
 	var hit_any := false
+	var touched_hider := false
 	for victim_id in player_order:
 		if victim_id == attacker_id:
 			continue
@@ -811,6 +851,7 @@ func _server_apply_strike(attacker_id: int) -> void:
 		to.y = 0.0
 		var dist := to.length()
 		if dist <= attacker._melee_range() and (dist <= 0.01 or fwd.angle_to(to.normalized()) <= attacker.ATTACK_ARC):
+			touched_hider = true
 			var hp_before: int = victim.hp
 			victim.take_damage(1)
 			if victim.hp < hp_before:
@@ -822,16 +863,28 @@ func _server_apply_strike(attacker_id: int) -> void:
 				_broadcast_scoreboard()
 	if hit_any:
 		_check_round_end()
-	else:
+	elif not touched_hider:
 		_server_punish_miss(attacker)
 
 ## Chaque coup de massue dans le vide (ou dans un vrai decor) coute 1 PV au chercheur.
 func _server_punish_miss(attacker: CharacterBody3D) -> void:
-	var new_hp: int = attacker.hp - 1
+	var new_hp: int = maxi(attacker.hp - 1, 0)
 	var now_dead: bool = new_hp <= 0
 	rpc("_client_player_health", seeker_id, new_hp, now_dead)
+	if not now_dead:
+		rpc("_client_temp_message", "Mauvais objet : -1 PV pour le chercheur.")
 	if now_dead:
 		_server_end_round("Le chercheur est K.O. — victoire des PROPS !")
+
+@rpc("authority", "call_local", "reliable")
+func _client_temp_message(text: String) -> void:
+	if phase == Phase.OVER:
+		return
+	message_label.text = text
+	get_tree().create_timer(1.8, false).timeout.connect(func() -> void:
+		if phase != Phase.OVER and message_label.text == text:
+			message_label.text = ""
+	)
 
 @rpc("authority", "call_local", "reliable")
 func _client_player_health(peer_id: int, hp_value: int, is_dead: bool) -> void:
@@ -881,6 +934,7 @@ func _on_start_pressed() -> void:
 func _server_start_round() -> void:
 	if phase != Phase.LOBBY or player_order.size() < 2:
 		return
+	_server_reset_props()
 	round_index += 1
 	var new_seeker: int = player_order[round_index % player_order.size()]
 	var ids: Array = []
@@ -935,6 +989,10 @@ func _client_round_setup(new_seeker_id: int, ids: Array, positions: Array, hps: 
 
 func _server_set_phase(new_phase: int, duration: float) -> void:
 	phase_time_left = duration
+	if new_phase == Phase.HUNT:
+		prop_move_timer = randf_range(PROP_MOVE_MIN_SECONDS, PROP_MOVE_MAX_SECONDS)
+	elif new_phase != Phase.HUNT:
+		prop_move_timer = 0.0
 	rpc("_client_phase_changed", new_phase)
 
 @rpc("authority", "call_local", "reliable")
@@ -964,6 +1022,89 @@ func _client_phase_changed(new_phase: int) -> void:
 @rpc("authority", "unreliable")
 func _client_phase_time(time_left: float) -> void:
 	phase_time_left = time_left
+
+func _update_server_prop_moves(delta: float) -> void:
+	prop_move_timer -= delta
+	if prop_move_timer > 0.0:
+		return
+	prop_move_timer = randf_range(PROP_MOVE_MIN_SECONDS, PROP_MOVE_MAX_SECONDS)
+	_server_try_move_random_prop()
+
+func _server_try_move_random_prop() -> bool:
+	if props.is_empty():
+		return false
+	for attempt in 32:
+		var prop_index := randi() % props.size()
+		var prop: Dictionary = props[prop_index]
+		var direction := Vector3(randf_range(-1.0, 1.0), 0.0, randf_range(-1.0, 1.0))
+		if direction.length() < 0.01:
+			continue
+		direction = direction.normalized()
+		var distance := randf_range(PROP_MOVE_MIN_DISTANCE, PROP_MOVE_MAX_DISTANCE)
+		var current_pos: Vector3 = prop["pos"]
+		var new_pos := current_pos + direction * distance
+		new_pos = Vector3(
+			clampf(new_pos.x, -PROP_MOVE_BOUND, PROP_MOVE_BOUND),
+			0.0,
+			clampf(new_pos.z, -PROP_MOVE_BOUND, PROP_MOVE_BOUND)
+		)
+		if _is_prop_spot_clear(int(prop["id"]), new_pos, float(prop["radius"])):
+			rpc("_client_move_decoy_prop", int(prop["id"]), new_pos)
+			return true
+	return false
+
+func _is_prop_spot_clear(prop_id: int, pos: Vector3, radius: float) -> bool:
+	if absf(pos.x) > PROP_MOVE_BOUND or absf(pos.z) > PROP_MOVE_BOUND:
+		return false
+	if (pos - HOUSE_POSITION).length() < radius + 3.2:
+		return false
+	if (pos - SEEKER_SPAWN).length() < radius + 1.2:
+		return false
+	for spawn in SPAWN_POINTS:
+		if (pos - spawn).length() < radius + 1.0:
+			return false
+	for prop in props:
+		if int(prop["id"]) == prop_id:
+			continue
+		var other_pos: Vector3 = prop["pos"]
+		var other_radius := float(prop["radius"])
+		if (pos - other_pos).length() < radius + other_radius + PROP_CLEARANCE_PADDING:
+			return false
+	for player in players.values():
+		if player != null and is_instance_valid(player):
+			var player_pos: Vector3 = player.global_position
+			player_pos.y = 0.0
+			if (pos - player_pos).length() < radius + 0.65:
+				return false
+	return true
+
+@rpc("authority", "call_local", "reliable")
+func _client_move_decoy_prop(prop_id: int, new_pos: Vector3) -> void:
+	for i in props.size():
+		var prop: Dictionary = props[i]
+		if int(prop["id"]) != prop_id:
+			continue
+		prop["pos"] = new_pos
+		props[i] = prop
+		var body: Node3D = prop.get("body")
+		if body != null and is_instance_valid(body):
+			var tw := body.create_tween()
+			tw.tween_property(body, "position", new_pos, 0.65).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+		return
+
+func _server_reset_props() -> void:
+	rpc("_client_reset_prop_positions")
+
+@rpc("authority", "call_local", "reliable")
+func _client_reset_prop_positions() -> void:
+	for i in props.size():
+		var prop: Dictionary = props[i]
+		var original_pos: Vector3 = prop["original_pos"]
+		prop["pos"] = original_pos
+		props[i] = prop
+		var body: Node3D = prop.get("body")
+		if body != null and is_instance_valid(body):
+			body.position = original_pos
 
 func _check_round_end() -> void:
 	if phase != Phase.HIDE and phase != Phase.HUNT:
@@ -998,6 +1139,7 @@ func _client_round_over(text: String) -> void:
 func _server_back_to_lobby() -> void:
 	for id in player_order:
 		rpc("_client_player_health", id, 8, false)
+	_server_reset_props()
 	_server_set_phase(Phase.LOBBY, 0.0)
 
 func _set_local_frozen(frozen: bool) -> void:
@@ -1030,6 +1172,7 @@ func _update_hud() -> void:
 			timer_label.text = "Fin de manche"
 	if seeker_overlay.visible:
 		seeker_overlay_label.text = "Les PROPS se cachent...\n%d s" % int(ceil(phase_time_left))
+	_update_local_hp_hud()
 	if start_button != null:
 		start_button.visible = multiplayer.multiplayer_peer != null \
 			and multiplayer.is_server() and phase == Phase.LOBBY
@@ -1056,6 +1199,32 @@ func _update_hud() -> void:
 			int(kills.get(id, 0)),
 		])
 	board_label.text = "\n".join(lines)
+
+func _update_local_hp_hud() -> void:
+	if local_hp_panel == null:
+		return
+	var local_id := multiplayer.get_unique_id() if multiplayer.multiplayer_peer != null else 0
+	var player: CharacterBody3D = players.get(local_id)
+	local_hp_panel.visible = player != null and multiplayer.multiplayer_peer != null
+	if not local_hp_panel.visible:
+		return
+	var max_value := _local_hp_max(local_id)
+	var hp_value := clampi(player.hp, 0, max_value)
+	local_hp_bar.max_value = max_value
+	local_hp_bar.value = hp_value
+	var role_text := ""
+	if phase != Phase.LOBBY:
+		role_text = " CHERCHEUR" if local_id == seeker_id else " PROP"
+	local_hp_label.text = "TES PV%s : %d / %d" % [role_text, hp_value, max_value]
+	local_hp_label.modulate = Color(1.0, 0.35, 0.35) if local_id == seeker_id and phase != Phase.LOBBY else Color(0.85, 1.0, 0.85)
+
+func _local_hp_max(local_id: int) -> int:
+	if phase != Phase.LOBBY:
+		return SEEKER_HP if local_id == seeker_id else HIDER_HP
+	var player: CharacterBody3D = players.get(local_id)
+	if player == null:
+		return 8
+	return maxi(8, player.hp)
 
 func _clean_name(value: String, fallback: String) -> String:
 	var text := value.strip_edges()
@@ -1109,12 +1278,34 @@ func _find_prop_spot(rng: RandomNumberGenerator, occupied: Array) -> Vector3:
 	return Vector3.INF
 
 func _add_prop(type: int, pos: Vector3, rot_y: float) -> void:
+	var prop_id := props.size()
 	var body := _make_obstacle(_prop_collision_shape(type), _prop_collision_offset(type))
+	body.name = "DecoyProp_%d" % prop_id
 	body.add_child(_make_prop_visual(type))
 	body.position = pos
 	body.rotation.y = rot_y
 	floor_root.add_child(body)
-	props.append({"type": type, "pos": pos})
+	props.append({
+		"id": prop_id,
+		"type": type,
+		"pos": pos,
+		"original_pos": pos,
+		"radius": _prop_clearance_radius(type),
+		"body": body,
+	})
+
+func _prop_clearance_radius(type: int) -> float:
+	match type:
+		Prop.TREE:
+			return 0.85
+		Prop.HAY:
+			return 0.75
+		Prop.BARREL, Prop.CRATE:
+			return 0.55
+		Prop.BUSH:
+			return 0.65
+		_:
+			return 0.5
 
 func _prop_collision_shape(type: int) -> Shape3D:
 	match type:

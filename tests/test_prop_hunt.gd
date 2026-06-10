@@ -60,6 +60,28 @@ func _ready() -> void:
 		_fail("phase HUNT attendue apres la cachette")
 		return
 	var seeker: CharacterBody3D = arena.players[1]
+	seeker.global_position = Vector3.ZERO
+	hider.global_position = Vector3(8.5, 0, 8.5)
+	hider.pvp_target_position = hider.global_position
+	var before_prop_positions: Dictionary = {}
+	for prop in arena.props:
+		before_prop_positions[int(prop["id"])] = prop["pos"]
+	var moved_prop: bool = arena._server_try_move_random_prop()
+	await get_tree().process_frame
+	if not moved_prop:
+		_fail("un objet decor devait pouvoir bouger pendant la chasse")
+		return
+	var moved_prop_count := 0
+	for prop in arena.props:
+		var prop_id := int(prop["id"])
+		if prop["pos"] != before_prop_positions[prop_id]:
+			moved_prop_count += 1
+			if not arena._is_prop_spot_clear(prop_id, prop["pos"], float(prop["radius"])):
+				_fail("un objet mobile chevauche un autre objet")
+				return
+	if moved_prop_count != 1:
+		_fail("un seul objet decor devait bouger (%d)" % moved_prop_count)
+		return
 	# coup manque : -1 PV pour le chercheur
 	seeker.global_position = Vector3.ZERO
 	seeker.rotation.y = PI
