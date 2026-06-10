@@ -308,6 +308,9 @@ func _build_ui() -> void:
 
 	_build_seeker_overlay()
 	_build_controls_panel()
+	# Les conteneurs plein ecran crees pour le menu peuvent intercepter les clics.
+	# Le bouton de lancement doit rester au-dessus quand le menu est masque.
+	ui_layer.move_child(start_button, ui_layer.get_child_count() - 1)
 
 func _build_seeker_overlay() -> void:
 	seeker_overlay = Control.new()
@@ -756,12 +759,11 @@ func _client_set_morph(peer_id: int, prop_type: int) -> void:
 	if player == null:
 		return
 	morphs[peer_id] = prop_type
-	var old: Node = player.get_node_or_null("MorphVisual")
-	if old != null:
-		old.queue_free()
+	_clear_morph_visual(player)
 	if prop_type >= 0:
 		var visual := _make_prop_visual(prop_type)
 		visual.name = "MorphVisual"
+		visual.set_meta("morph_visual", true)
 		player.add_child(visual)
 		player.model.visible = false
 		if peer_id != seeker_id:
@@ -773,6 +775,15 @@ func _client_set_morph(peer_id: int, prop_type: int) -> void:
 	else:
 		player.model.visible = true
 		player.speed_mult = SEEKER_SPEED_MULT if peer_id == seeker_id else 1.0
+
+func _clear_morph_visual(player: Node) -> void:
+	for child in player.get_children():
+		var child_name := str(child.name)
+		if child_name == "MorphVisual" \
+				or child_name.begins_with("@MorphVisual") \
+				or child.get_meta("morph_visual", false):
+			player.remove_child(child)
+			child.queue_free()
 
 @rpc("authority", "call_local", "reliable")
 func _client_play_attack(attacker_id: int) -> void:
@@ -903,9 +914,7 @@ func _client_round_setup(new_seeker_id: int, ids: Array, positions: Array, hps: 
 		player.pvp_target_rotation = 0.0
 		player.set_pvp_health(int(hps[i]), false)
 		morphs.erase(id)
-		var old: Node = player.get_node_or_null("MorphVisual")
-		if old != null:
-			old.queue_free()
+		_clear_morph_visual(player)
 		player.model.visible = true
 		if id == seeker_id:
 			player.set_pvp_color(SEEKER_COLOR)

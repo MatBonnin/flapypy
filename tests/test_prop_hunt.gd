@@ -42,6 +42,16 @@ func _ready() -> void:
 	if int(arena.morphs.get(2, -1)) < 0 or hider.model.visible:
 		_fail("le prop ne s'est pas deguise")
 		return
+	# changer rapidement de prop ne doit jamais empiler deux visuels
+	arena._client_set_morph(2, arena.Prop.TREE)
+	arena._client_set_morph(2, arena.Prop.PUMPKIN)
+	var morph_visual_count := 0
+	for child in hider.get_children():
+		if str(child.name) == "MorphVisual" or child.get_meta("morph_visual", false):
+			morph_visual_count += 1
+	if morph_visual_count != 1:
+		_fail("un seul visuel de prop attendu apres changement rapide (%d)" % morph_visual_count)
+		return
 	# fin de cachette acceleree
 	arena.phase_time_left = 0.0
 	await get_tree().process_frame
