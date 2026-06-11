@@ -8,6 +8,7 @@ var projectile_id := 0
 var owner_id := 0
 var direction := Vector3.FORWARD
 var damage := 2
+var speed_mult := 1.0
 var pvp_arena: Node = null
 var life := 0.0
 
@@ -15,8 +16,8 @@ func _ready() -> void:
 	body_entered.connect(_on_body_entered)
 
 func _physics_process(delta: float) -> void:
-	position += direction * SPEED * delta
-	rotate_object_local(Vector3(0, 0, 1), 18.0 * delta)
+	position += direction * SPEED * speed_mult * delta
+	rotate_object_local(Vector3(0, 0, 1), 18.0 * speed_mult * delta)
 	life += delta
 	if life > LIFETIME:
 		if multiplayer.is_server() and pvp_arena != null:

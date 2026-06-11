@@ -822,7 +822,7 @@ func request_pvp_strike(attacker_id: int) -> void:
 		rpc_id(1, "_server_request_action")
 
 ## Pas de projectile dans ce mode : la massue suffit au chercheur.
-func request_pvp_beak(_owner_id: int, _start_pos: Vector3, _direction: Vector3, _rot_y: float, _damage: int) -> void:
+func request_pvp_beak(_owner_id: int, _start_pos: Vector3, _direction: Vector3, _rot_y: float, _damage: int, _speed_mult := 1.0) -> void:
 	pass
 
 @rpc("any_peer", "reliable")
@@ -872,7 +872,7 @@ func _client_set_morph(peer_id: int, prop_type: int) -> void:
 		# son uniquement local : le chercheur ne doit pas entendre les
 		# re-deguisements des props
 		if sfx and peer_id == multiplayer.get_unique_id():
-			sfx.play_flap()
+			sfx.play_morph()
 	else:
 		player.model.visible = true
 		player.speed_mult = SEEKER_SPEED_MULT if peer_id == seeker_id else 1.0

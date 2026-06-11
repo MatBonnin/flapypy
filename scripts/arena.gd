@@ -602,7 +602,7 @@ func _begin_choice() -> void:
 	pool.shuffle()
 	for i in 3:
 		upgrade_options.append(pool[i])
-	sfx.play_score()
+	sfx.play_win()
 	message_label.text = "VAGUE %d NETTOYÉE !\nChoisis ton amélioration (touches 1, 2, 3) :\n1 — %s\n2 — %s\n3 — %s" % [
 		wave,
 		UPGRADE_TEXTS[upgrade_options[0]],
@@ -650,6 +650,7 @@ func _on_player_died() -> void:
 	game_over = true
 	spawn_timer.stop()
 	boss_bar.visible = false
+	sfx.play_lose()
 	_update_mouse_capture()
 	if kills > best:
 		best = kills

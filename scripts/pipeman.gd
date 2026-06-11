@@ -128,6 +128,14 @@ func _physics_process(delta: float) -> void:
 	if move_dir != Vector3.ZERO:
 		velocity = move_dir * speed
 		move_and_slide()
+		# bloqué pile face à un obstacle : on longe le mur au lieu de pousser
+		if get_slide_collision_count() > 0 and velocity.length() < 0.05:
+			var wall_normal := get_slide_collision(0).get_normal()
+			var side := Vector3(wall_normal.z, 0.0, -wall_normal.x)
+			if side.dot(move_dir) < 0.0:
+				side = -side
+			velocity = side * speed
+			move_and_slide()
 		position.x = clampf(position.x, -ARENA_HALF, ARENA_HALF)
 		position.z = clampf(position.z, -ARENA_HALF, ARENA_HALF)
 		position.y = 0.0
@@ -186,6 +194,8 @@ func _ring_attack() -> void:
 		_spawn_shot(Vector3(sin(ang), 0.0, cos(ang)))
 
 func _spawn_shot(dir: Vector3) -> void:
+	if sfx:
+		sfx.play_shoot()
 	var shot: Area3D = PipeShotScene.instantiate()
 	get_parent().add_child(shot)
 	shot.direction = dir

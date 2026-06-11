@@ -135,4 +135,10 @@ godot --headless res://tests/test_arena.tscn      # cycle de vagues + améliorat
 godot --headless res://tests/test_boss.tscn       # combat de boss
 godot --headless res://tests/test_regen.tscn      # régénération de vie
 godot --headless res://tests/test_prop_hunt.tscn  # manche complète de prop hunt
+godot --headless res://tests/test_pvp_charge.tscn # charge du lancer de bec en PvP
 ```
+
+## Sons
+
+Les effets sonores proviennent des packs audio CC0 de
+[Kenney](https://kenney.nl) (voir `assets/sounds/LICENSE.txt`).

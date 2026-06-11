@@ -886,21 +886,21 @@ func request_pvp_strike(attacker_id: int) -> void:
 	else:
 		rpc_id(1, "_server_request_strike")
 
-func request_pvp_beak(owner_id: int, _start_pos: Vector3, _direction: Vector3, _rot_y: float, _damage: int) -> void:
+func request_pvp_beak(owner_id: int, _start_pos: Vector3, _direction: Vector3, _rot_y: float, _damage: int, speed_mult := 1.0) -> void:
 	if not match_running or match_over:
 		return
 	if multiplayer.is_server():
-		_server_spawn_pvp_beak(owner_id, _start_pos, _direction, _rot_y)
+		_server_spawn_pvp_beak(owner_id, _start_pos, _direction, _rot_y, speed_mult)
 	else:
-		rpc_id(1, "_server_request_pvp_beak", _start_pos, _direction, _rot_y)
+		rpc_id(1, "_server_request_pvp_beak", _start_pos, _direction, _rot_y, speed_mult)
 
 @rpc("any_peer", "reliable")
-func _server_request_pvp_beak(start_pos: Vector3, direction: Vector3, rot_y: float) -> void:
+func _server_request_pvp_beak(start_pos: Vector3, direction: Vector3, rot_y: float, speed_mult := 1.0) -> void:
 	if not multiplayer.is_server() or not match_running or match_over:
 		return
-	_server_spawn_pvp_beak(multiplayer.get_remote_sender_id(), start_pos, direction, rot_y)
+	_server_spawn_pvp_beak(multiplayer.get_remote_sender_id(), start_pos, direction, rot_y, speed_mult)
 
-func _server_spawn_pvp_beak(owner_id: int, start_pos := Vector3.INF, direction := Vector3.ZERO, rot_y := INF) -> void:
+func _server_spawn_pvp_beak(owner_id: int, start_pos := Vector3.INF, direction := Vector3.ZERO, rot_y := INF, speed_mult := 1.0) -> void:
 	var player: CharacterBody3D = players.get(owner_id)
 	if player == null or player.dead:
 		return
@@ -921,6 +921,8 @@ func _server_spawn_pvp_beak(owner_id: int, start_pos := Vector3.INF, direction :
 		var clamped_start := _clamp_to_arena(start_pos)
 		clamped_start.y = clampf(start_pos.y, 0.4, 2.6)
 		base_spawn = clamped_start
+	# la charge vient du client : on la borne pour éviter toute triche
+	var clamped_mult := clampf(speed_mult, 1.0, 2.6)
 	var angles: Array[float] = [0.0]
 	if player.triple_timer > 0.0:
 		angles = [-0.3, 0.0, 0.3]
@@ -932,16 +934,17 @@ func _server_spawn_pvp_beak(owner_id: int, start_pos := Vector3.INF, direction :
 		var spawn_pos := base_spawn
 		if angle_offset != 0.0:
 			spawn_pos += dir * 0.18
-		rpc("_client_spawn_pvp_beak", projectile_id, owner_id, spawn_pos, dir, angle, player.beak_damage)
+		rpc("_client_spawn_pvp_beak", projectile_id, owner_id, spawn_pos, dir, angle, player.beak_damage, clamped_mult)
 
 @rpc("authority", "call_local", "reliable")
-func _client_spawn_pvp_beak(projectile_id: int, owner_id: int, spawn_pos: Vector3, dir: Vector3, rot_y: float, damage: int) -> void:
+func _client_spawn_pvp_beak(projectile_id: int, owner_id: int, spawn_pos: Vector3, dir: Vector3, rot_y: float, damage: int, speed_mult := 1.0) -> void:
 	var projectile: Area3D = PvpBeakScene.instantiate()
 	projectile.name = "PvpBeak_%d" % projectile_id
 	projectile.projectile_id = projectile_id
 	projectile.owner_id = owner_id
 	projectile.direction = dir.normalized()
 	projectile.damage = damage
+	projectile.speed_mult = speed_mult
 	projectile.pvp_arena = self
 	projectile.global_position = spawn_pos
 	projectile.rotation.y = rot_y
@@ -1223,6 +1226,11 @@ func _client_match_over(text: String, _winner_id: int) -> void:
 	match_running = false
 	match_over = true
 	message_label.text = "%s\nHote : Entree pour relancer" % text
+	if sfx:
+		if _winner_id == multiplayer.get_unique_id():
+			sfx.play_win()
+		else:
+			sfx.play_lose()
 
 @rpc("authority", "call_local", "reliable")
 func _client_match_message(text: String) -> void:

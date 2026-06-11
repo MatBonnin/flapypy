@@ -1,6 +1,10 @@
 extends Control
 ## Menu principal : choix du mode de jeu.
 
+const SfxScript := preload("res://scripts/sfx.gd")
+
+var sfx: Node = null
+
 const GAME_MODES := [
 	{
 		"label": "Flappy Bird 3D",
@@ -25,6 +29,8 @@ const GAME_MODES := [
 ]
 
 func _ready() -> void:
+	sfx = SfxScript.new()
+	add_child(sfx)
 	var background := ColorRect.new()
 	background.color = Color(0.13, 0.17, 0.25)
 	background.set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -89,4 +95,5 @@ func _ready() -> void:
 		first_button.grab_focus()
 
 func _start_mode(scene_path: String) -> void:
+	sfx.play_click()
 	get_tree().change_scene_to_file(scene_path)
