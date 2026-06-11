@@ -27,8 +27,12 @@ func _physics_process(delta: float) -> void:
 func _on_body_entered(body: Node3D) -> void:
 	if not multiplayer.is_server() or pvp_arena == null:
 		return
-	if body.is_in_group("pvp_players") and body.pvp_peer_id != owner_id:
+	if body.is_in_group("pvp_players"):
+		if body.pvp_peer_id == owner_id:
+			# le bec touche son propre lanceur au spawn : on l'ignore
+			return
 		pvp_arena.server_pvp_beak_hit(projectile_id, owner_id, body.pvp_peer_id, damage)
+		queue_free()
 	elif body is StaticBody3D:
 		pvp_arena.server_pvp_beak_expired(projectile_id)
-	queue_free()
+		queue_free()
