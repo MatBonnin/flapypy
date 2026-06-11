@@ -35,6 +35,8 @@ const PLAYER_FORWARD := 0.22
 const REQUIRED_FEATHERS := 3
 const SLOW_SECONDS := 2.3
 const SLOW_MULT := 0.55
+const INTERACT_RANGE := 2.25
+const KEY_DOOR_MIN_GRID_DISTANCE := 5
 
 const N := 1
 const E := 2
@@ -57,6 +59,7 @@ var door_edges: Array = []
 var shortcut_edges := {}
 var doors := {}
 var shortcuts := {}
+var interactables: Array[Area3D] = []
 var collected_feathers := 0
 var keys := 0
 var run_time := 0.0
@@ -98,6 +101,7 @@ func _process(delta: float) -> void:
 		slow_timer = maxf(slow_timer - delta, 0.0)
 		if slow_timer <= 0.0:
 			player.speed_mult = 1.0
+	_update_nearby_interactable()
 	_update_camera()
 	_update_hud()
 
@@ -213,8 +217,9 @@ func _pick_layout_points() -> void:
 			var b: int = path[door_index]
 			var edge := _edge_key(a, b)
 			if not _door_edge_exists(edge):
-				door_edges.append({"a": a, "b": b, "key": edge})
-				key_cells.append(path[maxi(1, door_index - 3)])
+				var key_cell := _pick_key_cell_for_door(path, door_index, a, b)
+				door_edges.append({"a": a, "b": b, "key": edge, "key_cell": key_cell})
+				key_cells.append(key_cell)
 	shortcut_edges.clear()
 	for i in GRID_W * GRID_H:
 		if shortcut_edges.size() >= 3:
@@ -231,6 +236,32 @@ func _door_edge_exists(edge: String) -> bool:
 		if String(entry["key"]) == edge:
 			return true
 	return false
+
+func _pick_key_cell_for_door(path: Array, door_index: int, door_a: int, door_b: int) -> int:
+	var door_distance := int(distances[door_a])
+	var blocked := [start_cell, exit_cell, door_a, door_b]
+	blocked.append_array(feather_cells)
+	blocked.append_array(key_cells)
+	var best := -1
+	var best_score := -99999.0
+	for cell in distances.size():
+		if blocked.has(cell) or int(distances[cell]) < 3:
+			continue
+		if int(distances[cell]) >= door_distance - 1:
+			continue
+		var grid_distance := mini(_grid_distance(cell, door_a), _grid_distance(cell, door_b))
+		if grid_distance < KEY_DOOR_MIN_GRID_DISTANCE:
+			continue
+		var score := float(grid_distance * 5 + int(distances[cell]))
+		for existing_key in key_cells:
+			score += minf(10.0, float(_grid_distance(cell, int(existing_key)))) * 1.5
+		if score > best_score:
+			best_score = score
+			best = cell
+	if best >= 0:
+		return best
+	var fallback_index := maxi(1, door_index - KEY_DOOR_MIN_GRID_DISTANCE)
+	return int(path[fallback_index])
 
 func _pick_far_cells(count: int, blocked: Array) -> Array:
 	var picked: Array[int] = []
@@ -327,6 +358,7 @@ func _build_world() -> void:
 		child.queue_free()
 	doors.clear()
 	shortcuts.clear()
+	interactables.clear()
 	_build_floor()
 	_build_walls()
 	_add_exit()
@@ -526,6 +558,8 @@ func _make_area(pos: Vector3, size: Vector3, kind: String, id: String) -> Area3D
 	area.body_entered.connect(_on_area_body_entered.bind(area))
 	area.body_exited.connect(_on_area_body_exited.bind(area))
 	dynamic_root.add_child(area)
+	if kind == "door" or kind == "lever":
+		interactables.append(area)
 	return area
 
 func _on_area_body_entered(body: Node3D, area: Area3D) -> void:
@@ -557,9 +591,6 @@ func _on_area_body_entered(body: Node3D, area: Area3D) -> void:
 				_win()
 			else:
 				_show_message("La sortie reclame encore %d plume(s)." % (REQUIRED_FEATHERS - collected_feathers))
-		"door", "lever":
-			nearby_interactable = area
-			_update_prompt()
 
 func _on_area_body_exited(body: Node3D, area: Area3D) -> void:
 	if body == player and nearby_interactable == area:
@@ -575,7 +606,9 @@ func _collect_area(area: Area3D, text: String) -> void:
 	_show_message(text)
 
 func _try_interact() -> void:
+	_update_nearby_interactable()
 	if nearby_interactable == null or not is_instance_valid(nearby_interactable):
+		_show_message("Rien a utiliser ici.")
 		return
 	var kind := String(nearby_interactable.get_meta("kind"))
 	var id := String(nearby_interactable.get_meta("id"))
@@ -590,6 +623,7 @@ func _try_interact() -> void:
 		if door.has("area") and is_instance_valid(door["area"]):
 			door["area"].queue_free()
 		doors.erase(id)
+		interactables.erase(nearby_interactable)
 		nearby_interactable = null
 		_show_message("Porte ouverte.")
 		if sfx:
@@ -599,6 +633,7 @@ func _try_interact() -> void:
 		if gate != null and is_instance_valid(gate):
 			gate.queue_free()
 		shortcuts.erase(id)
+		interactables.erase(nearby_interactable)
 		nearby_interactable.queue_free()
 		nearby_interactable = null
 		_show_message("Raccourci ouvert.")
@@ -763,6 +798,21 @@ func _update_prompt() -> void:
 		return
 	var kind := String(nearby_interactable.get_meta("kind"))
 	prompt_label.text = "E : ouvrir la porte" if kind == "door" else "E : activer le levier"
+
+func _update_nearby_interactable() -> void:
+	var best: Area3D = null
+	var best_dist := INTERACT_RANGE
+	var player_pos := player.global_position
+	for area in interactables:
+		if area == null or not is_instance_valid(area):
+			continue
+		var dist := player_pos.distance_to(area.global_position)
+		if dist < best_dist:
+			best_dist = dist
+			best = area
+	if nearby_interactable != best:
+		nearby_interactable = best
+		_update_prompt()
 
 func _show_message(text: String) -> void:
 	if message_label != null:

@@ -32,12 +32,32 @@ func _ready() -> void:
 		if not maze.doors.has(key):
 			_fail("porte verrouillee non construite")
 			return
+		var key_cell := int(door["key_cell"])
+		var dist_to_door := mini(
+			maze._grid_distance(key_cell, int(door["a"])),
+			maze._grid_distance(key_cell, int(door["b"]))
+		)
+		if dist_to_door < maze.KEY_DOOR_MIN_GRID_DISTANCE:
+			_fail("cle trop proche de sa porte (%d cases)" % dist_to_door)
+			return
 	if maze.key_cells.size() != maze.door_edges.size():
 		_fail("chaque porte verrouillee doit avoir une cle")
 		return
 	for cell in maze.key_cells:
 		if int(distances[int(cell)]) <= 0:
 			_fail("cle inaccessible")
+			return
+	if not maze.door_edges.is_empty():
+		var first_door: Dictionary = maze.door_edges[0]
+		var door_id := String(first_door["key"])
+		var door_data: Dictionary = maze.doors[door_id]
+		var area: Area3D = door_data["area"]
+		maze.keys = 1
+		maze.player.global_position = area.global_position
+		maze._update_nearby_interactable()
+		maze._try_interact()
+		if maze.doors.has(door_id) or maze.keys != 0:
+			_fail("interaction porte avec cle attendue")
 			return
 	maze.collected_feathers = maze.REQUIRED_FEATHERS
 	maze._win()
