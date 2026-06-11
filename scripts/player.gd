@@ -68,6 +68,7 @@ var _meshes: Array[MeshInstance3D] = []
 var _gold_mat: Material = null
 var _flash_mat: StandardMaterial3D
 var _pvp_base_mats := {}
+var _damage_overlay: ColorRect = null
 
 @onready var model: Node3D = $Model
 @onready var right_arm: Node3D = $Model/RightArm
@@ -450,6 +451,24 @@ func _flash() -> void:
 		m.material_override = _flash_mat
 	var tw := create_tween()
 	tw.tween_callback(_unflash).set_delay(0.1)
+	# en vue première personne le modèle est caché : le retour visuel
+	# des dégâts passe par un flash rouge plein écran
+	if first_person and _is_local_pvp_player():
+		_flash_screen()
+
+func _flash_screen() -> void:
+	if _damage_overlay == null:
+		var layer := CanvasLayer.new()
+		layer.layer = 50
+		_damage_overlay = ColorRect.new()
+		_damage_overlay.color = Color(0.9, 0.05, 0.05, 0.0)
+		_damage_overlay.set_anchors_preset(Control.PRESET_FULL_RECT)
+		_damage_overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		layer.add_child(_damage_overlay)
+		add_child(layer)
+	_damage_overlay.color.a = 0.35
+	var tw := create_tween()
+	tw.tween_property(_damage_overlay, "color:a", 0.0, 0.45)
 
 func _unflash() -> void:
 	for m in _meshes:

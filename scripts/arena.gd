@@ -506,9 +506,12 @@ func _update_camera(delta: float) -> void:
 	if player == null:
 		return
 	if first_person_view:
+		# la hauteur des yeux suit la taille du modèle (champignon) et le pas
+		var body_scale: float = player.model.scale.y
+		var eye_height: float = FIRST_PERSON_HEIGHT * body_scale + player.model.position.y * 1.5
 		var forward := Vector3(sin(player.rotation.y), 0.0, cos(player.rotation.y))
-		camera.global_position = player.global_position + Vector3(0, FIRST_PERSON_HEIGHT, 0) + forward * FIRST_PERSON_FORWARD
-		camera.rotation = Vector3(player.fp_pitch, player.rotation.y + PI, 0.0)
+		camera.global_position = player.global_position + Vector3(0, eye_height, 0) + forward * FIRST_PERSON_FORWARD * body_scale
+		camera.rotation = Vector3(player.fp_pitch, player.rotation.y + PI, player.swing * 0.03)
 		camera.fov = 75.0
 	else:
 		var target := player.position + CAMERA_OFFSET
