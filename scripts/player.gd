@@ -28,7 +28,8 @@ const ACTION_THROW_BEAK := "arena_throw_beak"
 const ACTION_JUMP := "arena_jump"
 const REGEN_DELAY := 4.0   # secondes sans dégât avant que la vie remonte
 const REGEN_INTERVAL := 1.5 # secondes entre chaque PV régénéré
-const FP_TURN_SPEED := 2.8 # vitesse de rotation du regard en vue première personne (rad/s)
+const FP_MOUSE_SENS := 0.003 # sensibilité souris en vue première personne (rad/pixel)
+const FP_PITCH_LIMIT := 1.25 # inclinaison verticale max du regard (rad)
 
 var hp := MAX_HP
 var max_hp := MAX_HP
@@ -60,6 +61,8 @@ var pvp_arena: Node = null
 var pvp_target_position := Vector3.ZERO
 var pvp_target_rotation := 0.0
 var first_person := false
+var fp_pitch := 0.0
+var fp_sens_mult := 1.0
 
 var _meshes: Array[MeshInstance3D] = []
 var _gold_mat: Material = null
@@ -119,12 +122,12 @@ func _physics_process(delta: float) -> void:
 	)
 	var dir := Vector3.ZERO
 	if first_person:
-		# En première personne les touches sont relatives au regard :
-		# gauche/droite tournent la vue, avancer/reculer suivent la caméra.
-		if input.x != 0.0:
-			rotation.y -= input.x * FP_TURN_SPEED * delta
-		if input.y != 0.0:
-			dir = Vector3(sin(rotation.y), 0.0, cos(rotation.y)) * -input.y
+		# En première personne la souris oriente le regard ; les touches
+		# déplacent relativement à la vue (avant/arrière + pas latéraux).
+		if input != Vector2.ZERO:
+			var forward := Vector3(sin(rotation.y), 0.0, cos(rotation.y))
+			var right := Vector3(-cos(rotation.y), 0.0, sin(rotation.y))
+			dir = (forward * -input.y + right * input.x).normalized()
 	elif input != Vector2.ZERO:
 		dir = Vector3(input.x, 0.0, input.y).normalized()
 	var speed := SPEED * speed_mult
@@ -160,6 +163,12 @@ func _apply_anim() -> void:
 
 func _unhandled_input(event: InputEvent) -> void:
 	if pvp_enabled and not _is_local_pvp_player():
+		return
+	if first_person and event is InputEventMouseMotion \
+			and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
+		var sens := FP_MOUSE_SENS * fp_sens_mult
+		rotation.y -= event.relative.x * sens
+		fp_pitch = clampf(fp_pitch - event.relative.y * sens, -FP_PITCH_LIMIT, FP_PITCH_LIMIT)
 		return
 	if dead:
 		return

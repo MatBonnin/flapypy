@@ -110,6 +110,8 @@ var control_buttons: Dictionary = {}
 var control_keys: Dictionary = {}
 var pending_rebind_action := ""
 var first_person_view := false
+var fp_sens := 1.0
+var sens_value_label: Label = null
 
 @onready var player: CharacterBody3D = $Player
 @onready var units: Node3D = $Units
@@ -129,6 +131,7 @@ func _ready() -> void:
 	_build_boss_bar()
 	_build_pause_menu()
 	prev_hp = player.hp
+	player.fp_sens_mult = fp_sens
 	player.sfx = sfx
 	player.hp_changed.connect(_on_player_hp_changed)
 	player.hit_landed.connect(func() -> void: add_shake(0.07))
@@ -283,6 +286,8 @@ func _build_pause_menu() -> void:
 		row.add_child(button)
 		control_buttons[binding["action"]] = button
 
+	_add_sensitivity_row(settings_page)
+
 	var reset_button := _make_menu_button("Touches par defaut")
 	reset_button.pressed.connect(_reset_controls)
 	settings_page.add_child(reset_button)
@@ -290,6 +295,40 @@ func _build_pause_menu() -> void:
 	var back_button := _make_menu_button("Retour")
 	back_button.pressed.connect(_show_pause_page)
 	settings_page.add_child(back_button)
+
+func _add_sensitivity_row(parent: Control) -> void:
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 12)
+	parent.add_child(row)
+
+	var label := Label.new()
+	label.text = "Sensibilite souris"
+	label.custom_minimum_size = Vector2(220, 32)
+	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	row.add_child(label)
+
+	var slider := HSlider.new()
+	slider.min_value = 0.2
+	slider.max_value = 3.0
+	slider.step = 0.1
+	slider.value = fp_sens
+	slider.custom_minimum_size = Vector2(180, 32)
+	slider.value_changed.connect(_on_sens_changed)
+	row.add_child(slider)
+
+	sens_value_label = Label.new()
+	sens_value_label.text = "%.1f" % fp_sens
+	sens_value_label.custom_minimum_size = Vector2(40, 32)
+	sens_value_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	row.add_child(sens_value_label)
+
+func _on_sens_changed(value: float) -> void:
+	fp_sens = value
+	if sens_value_label != null:
+		sens_value_label.text = "%.1f" % fp_sens
+	if player != null:
+		player.fp_sens_mult = fp_sens
+	_save_controls()
 
 func _make_menu_button(text: String) -> Button:
 	var button := Button.new()
@@ -323,6 +362,7 @@ func _set_paused(value: bool) -> void:
 	pause_overlay.visible = value
 	if value:
 		_show_pause_page()
+	_update_mouse_capture()
 
 func _begin_rebind(action: String) -> void:
 	pending_rebind_action = action
@@ -381,12 +421,15 @@ func _load_controls() -> void:
 			keycode = int(cfg.get_value("controls", action, keycode))
 		control_keys[action] = keycode
 		_apply_action_key(action, keycode)
+	if loaded:
+		fp_sens = clampf(float(cfg.get_value("camera", "fp_sens", 1.0)), 0.2, 3.0)
 
 func _save_controls() -> void:
 	var cfg := ConfigFile.new()
 	for binding in CONTROL_BINDINGS:
 		var action: String = binding["action"]
 		cfg.set_value("controls", action, int(control_keys[action]))
+	cfg.set_value("camera", "fp_sens", fp_sens)
 	cfg.save(SETTINGS_PATH)
 
 func _apply_action_key(action: String, keycode: int) -> void:
@@ -440,7 +483,18 @@ func _controls_hint() -> String:
 func _toggle_first_person() -> void:
 	first_person_view = not first_person_view
 	_update_local_player_visibility()
+	_update_mouse_capture()
 	_update_camera(1.0)
+
+func _update_mouse_capture() -> void:
+	var ui_open := pause_overlay != null and pause_overlay.visible
+	if first_person_view and not ui_open and not game_over:
+		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+	else:
+		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+
+func _exit_tree() -> void:
+	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 
 func _update_local_player_visibility() -> void:
 	if player == null:
@@ -454,7 +508,7 @@ func _update_camera(delta: float) -> void:
 	if first_person_view:
 		var forward := Vector3(sin(player.rotation.y), 0.0, cos(player.rotation.y))
 		camera.global_position = player.global_position + Vector3(0, FIRST_PERSON_HEIGHT, 0) + forward * FIRST_PERSON_FORWARD
-		camera.rotation = Vector3(0.0, player.rotation.y + PI, 0.0)
+		camera.rotation = Vector3(player.fp_pitch, player.rotation.y + PI, 0.0)
 		camera.fov = 75.0
 	else:
 		var target := player.position + CAMERA_OFFSET
@@ -593,6 +647,7 @@ func _on_player_died() -> void:
 	game_over = true
 	spawn_timer.stop()
 	boss_bar.visible = false
+	_update_mouse_capture()
 	if kills > best:
 		best = kills
 		_save_best()

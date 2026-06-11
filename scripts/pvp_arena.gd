@@ -133,6 +133,8 @@ var control_buttons: Dictionary = {}
 var control_keys: Dictionary = {}
 var pending_rebind_action := ""
 var controls_return_to_menu := false
+var fp_sens := 1.0
+var sens_value_label: Label = null
 
 @onready var units: Node3D = $Units
 @onready var floor_root: Node3D = $Floor
@@ -215,12 +217,15 @@ func _load_controls() -> void:
 			keycode = int(cfg.get_value("controls", action, keycode))
 		control_keys[action] = keycode
 		_apply_action_key(action, keycode)
+	if loaded:
+		fp_sens = clampf(float(cfg.get_value("camera", "fp_sens", 1.0)), 0.2, 3.0)
 
 func _save_controls() -> void:
 	var cfg := ConfigFile.new()
 	for binding in CONTROL_BINDINGS:
 		var action: String = binding["action"]
 		cfg.set_value("controls", action, int(control_keys[action]))
+	cfg.set_value("camera", "fp_sens", fp_sens)
 	cfg.save(SETTINGS_PATH)
 
 func _apply_action_key(action: String, keycode: int) -> void:
@@ -404,6 +409,8 @@ func _build_controls_panel() -> void:
 		row.add_child(button)
 		control_buttons[action] = button
 
+	_add_sensitivity_row(root)
+
 	var reset_button := Button.new()
 	reset_button.text = "Touches par defaut"
 	reset_button.custom_minimum_size = Vector2(260, 38)
@@ -430,6 +437,7 @@ func _show_controls_panel(return_to_menu: bool) -> void:
 	controls_panel.visible = true
 	controls_status.text = "Clique une action, puis appuie sur une touche."
 	_update_control_buttons()
+	_update_mouse_capture()
 
 func _hide_controls_panel() -> void:
 	pending_rebind_action = ""
@@ -438,6 +446,46 @@ func _hide_controls_panel() -> void:
 		menu_panel.visible = true
 	controls_return_to_menu = false
 	_update_control_buttons()
+	_update_mouse_capture()
+
+func _add_sensitivity_row(parent: Control) -> void:
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 12)
+	parent.add_child(row)
+
+	var label := Label.new()
+	label.text = "Sensibilite souris"
+	label.custom_minimum_size = Vector2(220, 32)
+	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	row.add_child(label)
+
+	var slider := HSlider.new()
+	slider.min_value = 0.2
+	slider.max_value = 3.0
+	slider.step = 0.1
+	slider.value = fp_sens
+	slider.custom_minimum_size = Vector2(180, 32)
+	slider.value_changed.connect(_on_sens_changed)
+	row.add_child(slider)
+
+	sens_value_label = Label.new()
+	sens_value_label.text = "%.1f" % fp_sens
+	sens_value_label.custom_minimum_size = Vector2(40, 32)
+	sens_value_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	row.add_child(sens_value_label)
+
+func _on_sens_changed(value: float) -> void:
+	fp_sens = value
+	if sens_value_label != null:
+		sens_value_label.text = "%.1f" % fp_sens
+	_apply_fp_sens()
+	_save_controls()
+
+func _apply_fp_sens() -> void:
+	var local_id := multiplayer.get_unique_id() if multiplayer.multiplayer_peer != null else 0
+	var player: CharacterBody3D = players.get(local_id)
+	if player != null:
+		player.fp_sens_mult = fp_sens
 
 func _begin_rebind(action: String) -> void:
 	pending_rebind_action = action
@@ -646,6 +694,7 @@ func _on_server_disconnected() -> void:
 	message_label.text = "Hote deconnecte."
 	match_running = false
 	match_over = true
+	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	if multiplayer.multiplayer_peer != null:
 		multiplayer.multiplayer_peer.close()
 		multiplayer.multiplayer_peer = null
@@ -1206,7 +1255,7 @@ func _update_camera(delta: float) -> void:
 	if first_person_view:
 		var forward := Vector3(sin(player.rotation.y), 0.0, cos(player.rotation.y))
 		camera.global_position = player.global_position + Vector3(0, FIRST_PERSON_HEIGHT, 0) + forward * FIRST_PERSON_FORWARD
-		camera.rotation = Vector3(0.0, player.rotation.y + PI, 0.0)
+		camera.rotation = Vector3(player.fp_pitch, player.rotation.y + PI, 0.0)
 		camera.fov = 75.0
 	else:
 		var target := player.position + CAMERA_OFFSET
@@ -1217,6 +1266,7 @@ func _update_camera(delta: float) -> void:
 func _toggle_first_person() -> void:
 	first_person_view = not first_person_view
 	_update_local_player_visibility()
+	_update_mouse_capture()
 	_update_camera(1.0)
 
 func _update_local_player_visibility() -> void:
@@ -1225,6 +1275,19 @@ func _update_local_player_visibility() -> void:
 	if player != null:
 		player.model.visible = not first_person_view
 		player.first_person = first_person_view
+		player.fp_sens_mult = fp_sens
+		_update_mouse_capture()
+
+func _update_mouse_capture() -> void:
+	var ui_open := (controls_panel != null and controls_panel.visible) \
+			or (menu_panel != null and menu_panel.visible)
+	if first_person_view and not ui_open:
+		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+	else:
+		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+
+func _exit_tree() -> void:
+	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 
 func _update_hud() -> void:
 	timer_label.text = "Temps : %03d" % int(ceil(match_time_left))
