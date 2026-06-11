@@ -11,6 +11,8 @@ jeu :
 - **Flappy Bird 3D** — le clone vu de côté (`scenes/main_3d.tscn`) ;
 - **Arène solo** — vagues d'ennemis et améliorations roguelite
   (`scenes/arena.tscn`) ;
+- **Labyrinthe** - exploration solo en vue premiere personne dans un
+  labyrinthe aleatoire (`scenes/maze.tscn`) ;
 - **PvP LAN** — multijoueur local 1 à 4 joueurs (`scenes/pvp_arena.tscn`) ;
 - **Prop Hunt LAN** — cache-cache déguisé en objets, 2 à 4 joueurs
   (`scenes/prop_hunt.tscn`).
@@ -115,6 +117,19 @@ les mêmes objets aux mêmes endroits. L'hôte est autoritaire pour les rôles,
 les dégâts et la fin de manche. En fin de manche, retour au lobby et l'hôte
 peut relancer sans recharger la scène.
 
+## Le Labyrinthe (`scenes/maze.tscn`)
+
+Mode solo en vue premiere personne : le joueur explore un labyrinthe genere a
+chaque partie, recupere **3 plumes dorees**, puis rejoint la sortie verte.
+
+Le labyrinthe est cree avec un algorithme de backtracking, puis quelques boucles
+sont ouvertes pour eviter un trajet trop lineaire. La partie ajoute des portes
+verrouillees avec cles, des leviers qui ouvrent des raccourcis et des dalles qui
+ralentissent temporairement le joueur.
+
+Commandes : **ZQSD / fleches** pour se deplacer, **souris** pour regarder,
+**E** pour interagir, **Espace** pour sauter et **Echap** pour la pause.
+
 ## Le Flappy Bird 3D (`scenes/main_3d.tscn`)
 
 Le jeu d'origine du projet, vu de côté en 3D : **Espace** ou clic pour voler,
@@ -136,6 +151,7 @@ godot --headless res://tests/test_boss.tscn       # combat de boss
 godot --headless res://tests/test_regen.tscn      # régénération de vie
 godot --headless res://tests/test_prop_hunt.tscn  # manche complète de prop hunt
 godot --headless res://tests/test_pvp_charge.tscn # charge du lancer de bec en PvP
+godot --headless res://tests/test_maze.tscn       # generation et victoire labyrinthe
 ```
 
 ## Sons

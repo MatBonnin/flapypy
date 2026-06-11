@@ -1,0 +1,47 @@
+[gd_scene load_steps=7 format=3]
+
+[ext_resource type="Script" path="res://scripts/maze_mode.gd" id="1_maze"]
+[ext_resource type="PackedScene" path="res://scenes/birdman.tscn" id="2_player"]
+[ext_resource type="Script" path="res://scripts/sfx.gd" id="3_sfx"]
+
+[sub_resource type="ProceduralSkyMaterial" id="ProceduralSkyMaterial_sky"]
+sky_top_color = Color(0.18, 0.27, 0.34, 1)
+sky_horizon_color = Color(0.43, 0.52, 0.55, 1)
+ground_bottom_color = Color(0.14, 0.17, 0.16, 1)
+ground_horizon_color = Color(0.43, 0.52, 0.55, 1)
+
+[sub_resource type="Sky" id="Sky_main"]
+sky_material = SubResource("ProceduralSkyMaterial_sky")
+
+[sub_resource type="Environment" id="Environment_main"]
+background_mode = 2
+sky = SubResource("Sky_main")
+ambient_light_source = 2
+ambient_light_color = Color(0.38, 0.45, 0.42, 1)
+fog_enabled = true
+fog_density = 0.018
+
+[node name="Maze" type="Node3D"]
+script = ExtResource("1_maze")
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
+environment = SubResource("Environment_main")
+
+[node name="DirectionalLight3D" type="DirectionalLight3D" parent="."]
+rotation = Vector3(-0.95, 0.45, 0)
+light_energy = 0.8
+shadow_enabled = true
+
+[node name="Camera3D" type="Camera3D" parent="."]
+fov = 74.0
+
+[node name="Floor" type="Node3D" parent="."]
+
+[node name="Dynamic" type="Node3D" parent="."]
+
+[node name="Player" parent="." instance=ExtResource("2_player")]
+
+[node name="Sfx" type="Node" parent="."]
+script = ExtResource("3_sfx")
+
+[node name="UI" type="CanvasLayer" parent="."]

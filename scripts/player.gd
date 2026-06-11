@@ -65,6 +65,8 @@ var pvp_target_rotation := 0.0
 var first_person := false
 var fp_pitch := 0.0
 var fp_sens_mult := 1.0
+var combat_enabled := true
+var movement_half := ARENA_HALF
 
 var beak_charging := false
 var beak_charge := 0.0
@@ -158,8 +160,9 @@ func _physics_process(delta: float) -> void:
 		speed *= 1.6
 	velocity = dir * speed
 	move_and_slide()
-	position.x = clampf(position.x, -ARENA_HALF, ARENA_HALF)
-	position.z = clampf(position.z, -ARENA_HALF, ARENA_HALF)
+	if movement_half > 0.0:
+		position.x = clampf(position.x, -movement_half, movement_half)
+		position.z = clampf(position.z, -movement_half, movement_half)
 	# saut : la hauteur est gérée à la main (pas de gravité sur le déplacement)
 	vy -= GRAVITY * delta
 	position.y += vy * delta
@@ -204,16 +207,16 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 	if event is InputEventKey and event.echo:
 		return
-	if event.is_action_pressed(ACTION_ATTACK):
+	if combat_enabled and event.is_action_pressed(ACTION_ATTACK):
 		attack()
-	elif event.is_action_pressed(ACTION_THROW_BEAK):
+	elif combat_enabled and event.is_action_pressed(ACTION_THROW_BEAK):
 		_start_beak_charge()
 	elif event.is_action_pressed(ACTION_JUMP):
 		jump()
 	elif event is InputEventMouseButton and event.pressed:
-		if event.button_index == MOUSE_BUTTON_LEFT:
+		if combat_enabled and event.button_index == MOUSE_BUTTON_LEFT:
 			attack()
-		elif event.button_index == MOUSE_BUTTON_RIGHT:
+		elif combat_enabled and event.button_index == MOUSE_BUTTON_RIGHT:
 			_start_beak_charge()
 
 func jump() -> void:
@@ -333,7 +336,7 @@ func _melee_range() -> float:
 	return melee_range
 
 func attack() -> void:
-	if dead or attacking or attack_timer > 0.0:
+	if not combat_enabled or dead or attacking or attack_timer > 0.0:
 		return
 	attack_timer = ATTACK_COOLDOWN
 	attacking = true
@@ -346,7 +349,7 @@ func attack() -> void:
 	tw.tween_callback(func() -> void: attacking = false)
 
 func _start_beak_charge() -> void:
-	if dead or beak_charging or beak_timer > 0.0:
+	if not combat_enabled or dead or beak_charging or beak_timer > 0.0:
 		return
 	beak_charging = true
 	beak_charge = 0.0
@@ -412,7 +415,7 @@ func _build_charge_bar() -> void:
 	layer.add_child(_charge_label)
 
 func throw_beak(speed_mult := 1.0) -> void:
-	if dead or beak_timer > 0.0:
+	if not combat_enabled or dead or beak_timer > 0.0:
 		return
 	if pvp_enabled:
 		beak_timer = (0.35 if triple_timer > 0.0 else BEAK_COOLDOWN) * beak_cd_mult

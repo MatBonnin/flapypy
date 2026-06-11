@@ -17,6 +17,11 @@ const GAME_MODES := [
 		"scene": "res://scenes/arena.tscn",
 	},
 	{
+		"label": "Labyrinthe",
+		"hint": "Explore un labyrinthe aleatoire en vue premiere personne.",
+		"scene": "res://scenes/maze.tscn",
+	},
+	{
 		"label": "PvP LAN",
 		"hint": "1 à 4 joueurs sur le même réseau.",
 		"scene": "res://scenes/pvp_arena.tscn",
