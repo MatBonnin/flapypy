@@ -1198,6 +1198,7 @@ func _update_local_player_visibility() -> void:
 		return
 	var morphed := int(morphs.get(local_id, -1)) >= 0
 	var morph_visual: Node3D = player.get_node_or_null("MorphVisual")
+	player.first_person = first_person_view
 	if first_person_view:
 		player.model.visible = false
 		if morph_visual != null:

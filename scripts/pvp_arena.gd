@@ -1224,6 +1224,7 @@ func _update_local_player_visibility() -> void:
 	var player: CharacterBody3D = players.get(local_id)
 	if player != null:
 		player.model.visible = not first_person_view
+		player.first_person = first_person_view
 
 func _update_hud() -> void:
 	timer_label.text = "Temps : %03d" % int(ceil(match_time_left))

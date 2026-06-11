@@ -446,6 +446,7 @@ func _update_local_player_visibility() -> void:
 	if player == null:
 		return
 	player.model.visible = not first_person_view
+	player.first_person = first_person_view
 
 func _update_camera(delta: float) -> void:
 	if player == null:

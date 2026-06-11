@@ -28,6 +28,7 @@ const ACTION_THROW_BEAK := "arena_throw_beak"
 const ACTION_JUMP := "arena_jump"
 const REGEN_DELAY := 4.0   # secondes sans dégât avant que la vie remonte
 const REGEN_INTERVAL := 1.5 # secondes entre chaque PV régénéré
+const FP_TURN_SPEED := 2.8 # vitesse de rotation du regard en vue première personne (rad/s)
 
 var hp := MAX_HP
 var max_hp := MAX_HP
@@ -58,6 +59,7 @@ var pvp_peer_id := 0
 var pvp_arena: Node = null
 var pvp_target_position := Vector3.ZERO
 var pvp_target_rotation := 0.0
+var first_person := false
 
 var _meshes: Array[MeshInstance3D] = []
 var _gold_mat: Material = null
@@ -116,7 +118,14 @@ func _physics_process(delta: float) -> void:
 		ACTION_MOVE_DOWN
 	)
 	var dir := Vector3.ZERO
-	if input != Vector2.ZERO:
+	if first_person:
+		# En première personne les touches sont relatives au regard :
+		# gauche/droite tournent la vue, avancer/reculer suivent la caméra.
+		if input.x != 0.0:
+			rotation.y -= input.x * FP_TURN_SPEED * delta
+		if input.y != 0.0:
+			dir = Vector3(sin(rotation.y), 0.0, cos(rotation.y)) * -input.y
+	elif input != Vector2.ZERO:
 		dir = Vector3(input.x, 0.0, input.y).normalized()
 	var speed := SPEED * speed_mult
 	if coffee_timer > 0.0:
@@ -133,7 +142,8 @@ func _physics_process(delta: float) -> void:
 		vy = 0.0
 		jumps_left = max_jumps
 	if dir != Vector3.ZERO:
-		rotation.y = lerp_angle(rotation.y, atan2(dir.x, dir.z), 12.0 * delta)
+		if not first_person:
+			rotation.y = lerp_angle(rotation.y, atan2(dir.x, dir.z), 12.0 * delta)
 		anim_time += delta * 2.0 * speed
 		swing = sin(anim_time) * 0.55
 	else:
